@@ -16,3 +16,11 @@ circle.onmousedown = () => {
 circle.onmouseup = () => {
   engine.vars.HEART = false;
 }
+
+circle.addEventListener('touchstart', () => {
+  engine.vars.HEART = true;
+})
+
+circle.addEventListener('touchend', () => {
+  engine.vars.HEART = false
+})
