@@ -10,10 +10,23 @@
   <!-- HTML -->
   
   <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="screen.css">
+  <link rel="stylesheet" href="ide.css">
 </head>
 
 <body>
-  <div id="app"></div>
+  <div id="app">
+    <div id="engine"></div>
+    <svg id="screen" viewBox="0 0 100 100" width="100" height="100">
+      <defs>
+        <pattern id="img1" patternUnits="userSpaceOnUse" width="100" height="100">
+          <image href="circult.svg" x="0" y="0" width="100" height="100" />
+        </pattern>
+      </defs>
+      <circle cx="50" cy="50" r="40" fill="url(#img1)" />
+    </svg>
+    <div id="ide"></div>
+  </div>
   <script src="main.js" type="module"></script>
 </body>
 </html>

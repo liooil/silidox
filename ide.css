@@ -1,0 +1,40 @@
+#ide table {
+  width: 100%;
+  height: 20px;
+}
+
+#ide table tr {
+  height: 20px;
+}
+#ide table td {
+  padding: 0 5px;
+  text-align: center;
+}
+#ide table td:nth-child(1) {
+  width: 50%;
+}
+#ide table td:nth-child(2) {
+  width: 25%;
+}
+#ide table td:nth-child(3) {
+  width: 25%;
+}
+#ide table button {
+  width: 100%;
+  height: 100%;
+  background-color: #f0f0f0;
+  border: none;
+  cursor: pointer;
+  border-radius: 5px;
+}
+#ide table button:hover {
+  background-color: #e0e0e0;
+}
+#ide table button:active {
+  background-color: #d0d0d0;
+}
+#ide-body {
+  width: 100%;
+  height: 100%;
+  background-color: #f0f0f0;
+}

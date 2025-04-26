@@ -1,0 +1,137 @@
+export class IDE {
+  vars = [
+    new SILVar('TICK', 'INT').readonly(),
+    new SILVar('HEART', 'BOOL').readonly(),
+  ];
+  lads = [new SILLad()];
+  head = document.createElement('table');
+  body = document.createElement('div');
+
+  constructor(node = document.getElementById('ide')) {
+    this.node = node;
+    this.node.controller = this;
+    this.node.append(this.head, this.body);
+    this.render();
+  }
+  render() {
+    this.renderHead();
+    this.renderBody();
+  }
+
+  renderHead() {
+    this.head.innerHTML = '';
+    const headRow = this.head.appendChild(document.createElement('tr'));
+    for (const name of ['名称', '类型', '值']) {
+      const cell = headRow.appendChild(document.createElement('th'));
+      cell.textContent = name;
+    }
+    const silvars = this.head.appendChild(document.createElement('tbody'));
+    silvars.id = 'ide-vars';
+    for (const silvar of this.vars) {
+      silvar.render(silvars);
+    }
+    const addBtn = this.head.appendChild(document.createElement('button'));
+    addBtn.textContent = '添加变量';
+    addBtn.onclick = () => {
+      this.vars.push(new SILVar(this.getNextName("VAR_"), 'BOOL', ''));
+      this.renderHead();
+    };
+  }
+  renderBody() {
+    for (const lad of this.lads) {
+      lad.render(this.body);
+    }
+  }
+
+  monitor(values) {
+    for (const silvar of this.vars) {
+      silvar.monitor(values[silvar.name]);
+    }
+  }
+
+  getNextName(prefix) {
+    let i = 1;
+    while (this.vars.find((v) => v.name === `${prefix}${i}`)) {
+      i++;
+    }
+    return `${prefix}${i}`;
+  }
+}
+
+/**
+ * 变量
+ */
+export class SILVar {
+  editable = true;
+  /**
+   * @param {string} name
+   * @param {string} type
+   * @param {string} value
+   */
+  constructor(name, type, value = '') {
+    this.name = name;
+    this.type = type;
+    this.value = value;
+  }
+  readonly() {
+    this.editable = false;
+    return this;
+  }
+  render(tbody) {
+    const row = tbody.appendChild(document.createElement('tr'));
+    row.controller = this;
+    const nameCell = row.appendChild(document.createElement('td'));
+    this.renderCell(nameCell, 'name');
+    const typeCell = row.appendChild(document.createElement('td'));
+    this.renderCell(typeCell, 'type');
+    const valueCell = row.appendChild(document.createElement('td'));
+    this.renderCell(valueCell, 'value');
+    this.node = row;
+    this.nameCell = nameCell;
+    this.typeCell = typeCell;
+    this.valueCell = valueCell;
+  }
+  monitor(value) {
+    if (this.valueCell) {
+      this.valueCell.textContent = value;
+      this.valueCell.style.color = 'blue';
+    }
+  }
+
+  renderCell(cell, key) {
+    cell.textContent = this[key];
+    if (this.editable) {
+      cell.ondblclick = () => {
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.value = this[key];
+        cell.textContent = '';
+        cell.appendChild(input);
+        input.focus();
+        input.onblur = () => {
+          this[key] = input.value;
+          cell.textContent = this[key];
+          input.remove();
+        };
+      };  
+    } else {
+      cell.style.color = 'gray';
+      cell.style.cursor = 'not-allowed';
+    }
+  }
+}
+
+/**
+ * 梯级
+ */
+export class SILLad {
+  constructor() {
+  }
+  render(parent) {
+    const svg = parent.appendChild(document.createElementNS('http://www.w3.org/2000/svg', 'svg'));
+    svg.setAttribute('viewBox', '0 0 100 100');
+    svg.setAttribute('width', '100%');
+    svg.setAttribute('height', '100%');
+    svg.setAttribute('preserveAspectRatio', 'xMinYMin meet');
+  }
+}

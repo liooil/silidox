@@ -1,22 +1,18 @@
 import { Engine } from "./engine.js"
+import { Screen } from "./screen.js";
+import { IDE } from "./ide.js";
 
 const app = document.getElementById('app')
 
-const engine = new Engine()
+const engine = new Engine();
+const screen = new Screen();
+const ide = new IDE();
 
-function add(parent, tag, id) {
-  const el = parent.appendChild(document.createElement(tag))
-  el.id = id;
-  return el;
+const circle = screen.node.querySelector('circle');
+
+circle.onmousedown = () => {
+  engine.vars.HEART = true;
 }
-
-const pulse = add(app, 'div', 'pulse')
-
-pulse.textContent = '心跳'
-pulse.onclick = () => {
-  engine.pulse()
-  pulse.animate([
-    {},
-    {},
-  ], 1000);
+circle.onmouseup = () => {
+  engine.vars.HEART = false;
 }
