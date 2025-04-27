@@ -18,8 +18,15 @@ export class Screen {
   monitor(engine) {
     const circle = this.node.querySelector('circle');
     if (circle) {
-      circle.setAttribute('r', engine.heartCount + 20);
+      circle.setAttribute('r', this.getCircleR(engine.heartCount));
     }
+  }
+  getCircleR(heartCount) {
+    // 0 = 20
+    // 10 = 60
+    // 20 = 100
+    if (heartCount <= 20) return 20 + heartCount * 1
+    return 40
   }
 }
 
