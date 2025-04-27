@@ -1,3 +1,5 @@
+import { INT32_MAX } from './types.js';
+
 export class Engine {
   heartWindow = Array.from({ length: 100 }, () => false);
   heartCount = 0;
@@ -19,12 +21,8 @@ export class Engine {
     // 读取 input
     this.vars.TICK = (this.vars.TICK + 1) % 1000;
     let idx = this.vars.TICK % 100
-    if (this.heartWindow[idx]) {
-      this.heartCount--
-    }
-    if (this.vars.HEART) {
-      this.heartCount++;
-    }
+    if (this.heartWindow[idx]) this.heartCount--;
+    if (this.vars.HEART) this.heartCount++;
     this.heartWindow[idx] = this.vars.HEART
     // 计算心跳, 心跳数在 10 到 90 之间
     if (this.heartCount < 10) {

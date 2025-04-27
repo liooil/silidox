@@ -38,3 +38,7 @@
   height: 100%;
   background-color: #f0f0f0;
 }
+
+svg.lad line {
+  stroke-width: 1;
+}

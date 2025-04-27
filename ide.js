@@ -1,9 +1,15 @@
+import { LADNode, LADSeries, LADParallel } from "./lad.js";
+
 export class IDE {
   vars = [
-    new SILVar('TICK', 'INT').readonly(),
+    new SILVar('TICK', 'INT32').readonly(),
     new SILVar('HEART', 'BOOL').readonly(),
   ];
-  lads = [new SILLad()];
+  lads = [
+    new SILLad()
+      .appendChild(LADNode.contact().operandOf('VAR_A'))
+      .appendChild(LADNode.coil().operandOf('VAR_B')),
+  ];
   head = document.createElement('table');
   body = document.createElement('div');
 
@@ -113,7 +119,7 @@ export class SILVar {
           cell.textContent = this[key];
           input.remove();
         };
-      };  
+      };
     } else {
       cell.style.color = 'gray';
       cell.style.cursor = 'not-allowed';
@@ -124,14 +130,22 @@ export class SILVar {
 /**
  * 梯级
  */
-export class SILLad {
+export class SILLad extends LADSeries {
   constructor() {
+    super();
   }
   render(parent) {
     const svg = parent.appendChild(document.createElementNS('http://www.w3.org/2000/svg', 'svg'));
+    svg.classList.add('lad');
     svg.setAttribute('viewBox', '0 0 100 100');
     svg.setAttribute('width', '100%');
     svg.setAttribute('height', '100%');
     svg.setAttribute('preserveAspectRatio', 'xMinYMin meet');
+    const line = svg.appendChild(document.createElementNS('http://www.w3.org/2000/svg', 'line'));
+    line.setAttribute('x1', '0');
+    line.setAttribute('y1', '20');
+    line.setAttribute('x2', '100');
+    line.setAttribute('y2', '20');
+    line.setAttribute('stroke', 'black');
   }
 }

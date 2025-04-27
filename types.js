@@ -1,0 +1,11 @@
+export const INT32_MAX = 0x7FFFFFFF;
+export const INT32_MIN = -0x80000000;
+export const UINT32_MAX = 0xFFFFFFFF;
+export const UINT32_MIN = 0;
+export const INT16_MAX = 0x7FFF;
+export const INT16_MIN = -0x8000;
+export const UINT16_MAX = 0xFFFF;
+export const INT8_MAX = 0x7F;
+export const INT8_MIN = -0x80;
+export const UINT8_MAX = 0xFF;
+export const UINT8_MIN = 0;

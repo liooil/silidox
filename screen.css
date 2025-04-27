@@ -1,5 +1,8 @@
 #screen circle {
   cursor: pointer;
   user-select: none;
-  stroke: black;
+  mask-image: url(circult.svg);
+  mask-size: 100px;
+  mask-position: center;
+  mask-repeat: no-repeat;
 }
