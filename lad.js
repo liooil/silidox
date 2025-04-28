@@ -1,55 +1,31 @@
 export class LADShape {
   location = { x: 0, y: 0 };
-  boundingBox = { top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0 };
-  set x(x) {
-    const dx = x - this.location.x;
-    this.location.x = x;
-    this.boundingBox.left += dx;
-    this.boundingBox.right += dx;
+  size = { top: 0, bottom: 0, left: 0, right: 0 };
+  innerSize = { left: 0, right: 0 };
+  get boundingBox() {
+    return {
+      left: this.location.x - this.size.left,
+      right: this.location.x + this.size.right,
+      top: this.location.y - this.size.top,
+      bottom: this.location.y + this.size.bottom,
+      width: this.size.left + this.size.right,
+      height: this.size.top + this.size.bottom,
+    };
   }
-  get x() {
-    return this.location.x;
+  get connectors() {
+    return {
+      left: this.location.x - this.innerSize.left,
+      right: this.location.x + this.innerSize.right,
+    };
   }
-  set y(y) {
-    const dy = y - this.location.y;
-    this.location.y = y;
-    this.boundingBox.top += dy;
-    this.boundingBox.bottom -= dy;
-  }
-  get y() {
-    return this.location.y;
-  }
-  set top(y) {
-    const dy = y - this.boundingBox.top;
-    this.boundingBox.top = y;
-    this.boundingBox.height -= dy;
-  }
-  get top() {
-    return this.boundingBox.top;
-  }
-  set bottom(y) {
-    const dy = y - this.boundingBox.bottom;
-    this.boundingBox.bottom = y;
-    this.boundingBox.height += dy;
-  }
-  get bottom() {
-    return this.boundingBox.bottom;
-  }
-  set left(x) {
-    const dx = x - this.boundingBox.left;
-    this.boundingBox.left = x;
-    this.boundingBox.width -= dx;
-  }
-  get left() {
-    return this.boundingBox.left;
-  }
-  set right(x) {
-    const dx = x - this.boundingBox.right;
-    this.boundingBox.right = x;
-    this.boundingBox.width += dx;
-  }
-  get right() {
-    return this.boundingBox.right;
+  /**
+   * @param {SVGElement} parent
+   */
+  render(parent) {
+    const g = parent.appendChild(document.createElementNS('http://www.w3.org/2000/svg', 'g'));
+    g.controller = this;
+    g.setAttribute('transform', `translate(${this.location.x},${this.location.y})`);
+    return g;
   }
 }
 
@@ -80,20 +56,56 @@ export class LADNode extends LADShape {
     return this;
   }
   layout() {
-    this.left -= 20;
-    this.right += 20;
-    this.top -= 40;
-    this.bottom += 20;
+    this.size.left = 40;
+    this.size.right = 40;
+    this.size.top = 40;
+    this.size.bottom = 20;
+    this.innerSize.left = this.section === 'input' ? 10 : 12;
+    this.innerSize.right = this.section === 'input' ? 10 : 12;
   }
   render(parent) {
-    const g = parent.appendChild(document.createElementNS('http://www.w3.org/2000/svg', 'g'));
-    g.controller = this;
-    g.setAttribute('transform', `translate(${this.x},${this.y})`);
+    const g = super.render(parent);
     const text = g.appendChild(document.createElementNS('http://www.w3.org/2000/svg', 'text'));
     text.textContent = this.operand;
+    text.setAttribute('y', -20);
+    text.setAttribute('text-anchor', 'middle');
+    if (this.section === 'input') {
+      let path;
+      path = g.appendChild(document.createElementNS('http://www.w3.org/2000/svg', 'path'));
+      path.setAttribute('d', `M-10,-10 L-10,10`);
+      path.setAttribute('stroke', 'black');
+      path.setAttribute('fill', 'none');
+      path = g.appendChild(document.createElementNS('http://www.w3.org/2000/svg', 'path'));
+      path.setAttribute('d', `M10,-10 L10,10`);
+      path.setAttribute('stroke', 'black');
+      path.setAttribute('fill', 'none');
+    } else {
+      let path;
+      let dx = 3;
+      let dy = 2;
+      path = g.appendChild(document.createElementNS('http://www.w3.org/2000/svg', 'path'));
+      path.setAttribute('d', `M${-10+dx},-10 C${-10-dx},${-10+dy} ${-10-dx},${10-dy} ${-10+dx},10`);
+      path.setAttribute('stroke', 'black');
+      path.setAttribute('fill', 'none');
+      path = g.appendChild(document.createElementNS('http://www.w3.org/2000/svg', 'path'));
+      path.setAttribute('d', `M${10-dx},-10 C${10+dx},${-10+dy} ${10+dx},${10-dy} ${10-dx},10`);
+      path.setAttribute('stroke', 'black');
+      path.setAttribute('fill', 'none');
+    }
+    const icon = g.appendChild(document.createElementNS('http://www.w3.org/2000/svg', 'text'));
+    icon.setAttribute('text-anchor', 'middle');
+    icon.setAttribute('dominant-baseline', 'middle');
+    icon.setAttribute('font-size', '20px');
+    if (this.type === 'open') {
+      icon.textContent = this.reverse ? '/' : ' ';
+    } else if (this.type === 'set') {
+      icon.textContent = this.reverse ? 'R' : 'S';
+    } else if (this.type === 'rise') {
+      icon.textContent = this.reverse ? 'N' : 'P';
+    }
   }
   static contact(kind = 'open') {
-    const self = new LADNode().output();
+    const self = new LADNode();
     switch (kind) {
       case 'open': return self;
       case 'closed': return self.reversed();
@@ -106,7 +118,7 @@ export class LADNode extends LADShape {
     const self = new LADNode().output();
     switch (kind) {
       case 'default': return self;
-      case 'closed': return self.reversed();
+      case 'negated': return self.reversed();
       case 'set': return self.typeOf('set');
       case 'reset': return self.typeOf('set').reversed();
       case 'positive': return self.typeOf('rise');
@@ -135,17 +147,36 @@ export class LADSeries extends LADShape {
     return this;
   }
   layout() {
-    let x = this.left;
-    let top = this.top;
-    let y = this.y;
     for (const child of this.children) {
-      child.x = x;
-      child.y = top;
       child.layout();
-      y = Math.max(y, child.y);
+      this.size.top = Math.max(this.size.top, child.size.top);
+      this.size.bottom = Math.max(this.size.bottom, child.size.bottom);
     }
+    this.location.y = this.size.top;
+
+    let x = 0;
     for (const child of this.children) {
-      child.y = y;
+      x += child.size.left;
+      child.location.x = x;
+      x += child.size.right;
+      x += 20;
     }
+    this.size.right = x;
+  }
+  render(parent) {
+    const g = super.render(parent);
+    for (const child of this.children) {
+      child.render(g);
+    }
+    for (let i = 0; i < this.children.length - 1; i++) {
+      const child = this.children[i];
+      const nextChild = this.children[i + 1];
+      const line = g.appendChild(document.createElementNS('http://www.w3.org/2000/svg', 'line'));
+      line.setAttribute('x1', child.connectors.right);
+      line.setAttribute('x2', nextChild.connectors.left);
+      line.setAttribute('stroke', 'black');
+      line.setAttribute('fill', 'none');
+    }
+    return g;
   }
 }

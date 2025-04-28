@@ -38,7 +38,13 @@
   height: 100%;
   background-color: #f0f0f0;
 }
+svg.lad {
+  font-size: 12px;
+  font-family: monospace;
+  border: 1px solid black;
+}
 
 svg.lad line {
   stroke-width: 1;
+  stroke: black;
 }

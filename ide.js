@@ -8,7 +8,19 @@ export class IDE {
   lads = [
     new SILLad()
       .appendChild(LADNode.contact().operandOf('VAR_A'))
-      .appendChild(LADNode.coil().operandOf('VAR_B')),
+      .appendChild(LADNode.contact('closed').operandOf('VAR_A'))
+      .appendChild(LADNode.coil().operandOf('VAR_B'))
+      .appendChild(LADNode.coil('negated').operandOf('VAR_B')),
+    new SILLad()
+      .appendChild(LADNode.contact('positive').operandOf('VAR_A'))
+      .appendChild(LADNode.contact('negative').operandOf('VAR_A'))
+      .appendChild(LADNode.coil('positive').operandOf('VAR_B'))
+      .appendChild(LADNode.coil('negative').operandOf('VAR_B')),
+    new SILLad()
+      .appendChild(LADNode.contact().operandOf('VAR_A'))
+      .appendChild(LADNode.coil('set').operandOf('VAR_B'))
+      .appendChild(LADNode.coil('reset').operandOf('VAR_B')),
+
   ];
   head = document.createElement('table');
   body = document.createElement('div');
@@ -131,21 +143,14 @@ export class SILVar {
  * 梯级
  */
 export class SILLad extends LADSeries {
-  constructor() {
-    super();
-  }
   render(parent) {
+    super.layout();
     const svg = parent.appendChild(document.createElementNS('http://www.w3.org/2000/svg', 'svg'));
     svg.classList.add('lad');
-    svg.setAttribute('viewBox', '0 0 100 100');
+    svg.setAttribute('viewBox', `0 0 ${this.boundingBox.width} ${this.boundingBox.height}`);
     svg.setAttribute('width', '100%');
-    svg.setAttribute('height', '100%');
     svg.setAttribute('preserveAspectRatio', 'xMinYMin meet');
-    const line = svg.appendChild(document.createElementNS('http://www.w3.org/2000/svg', 'line'));
-    line.setAttribute('x1', '0');
-    line.setAttribute('y1', '20');
-    line.setAttribute('x2', '100');
-    line.setAttribute('y2', '20');
-    line.setAttribute('stroke', 'black');
+    super.render(svg);
+    return svg;
   }
 }
