@@ -20,7 +20,7 @@ export class IDE {
       .appendChild(LADNode.contact().operandOf('VAR_A'))
       .appendChild(LADNode.coil('set').operandOf('VAR_B'))
       .appendChild(LADNode.coil('reset').operandOf('VAR_B')),
-
+    new SILLad()
   ];
   head = document.createElement('table');
   body = document.createElement('div');
@@ -56,9 +56,17 @@ export class IDE {
     };
   }
   renderBody() {
+    this.body.innerHTML = '';
     for (const lad of this.lads) {
       lad.render(this.body);
     }
+    const addBtn = this.body.appendChild(document.createElement('button'));
+    addBtn.textContent = '添加梯级';
+    addBtn.classList.add('add-lad');
+    addBtn.onclick = () => {
+      this.lads.push(new SILLad());
+      this.renderBody();
+    };
   }
 
   monitor(values) {
@@ -145,12 +153,43 @@ export class SILVar {
 export class SILLad extends LADSeries {
   render(parent) {
     super.layout();
+    if (this.children.length === 0) {
+      this.location.y = 20;
+      this.size.right = 200;
+      this.size.bottom = 40;
+    }
     const svg = parent.appendChild(document.createElementNS('http://www.w3.org/2000/svg', 'svg'));
     svg.classList.add('lad');
     svg.setAttribute('viewBox', `0 0 ${this.boundingBox.width} ${this.boundingBox.height}`);
-    svg.setAttribute('width', '100%');
+    svg.setAttribute('width', `100%`);
     svg.setAttribute('preserveAspectRatio', 'xMinYMin meet');
     super.render(svg);
+    if (this.children.length > 0) {
+      /** @type {SVGLineElement} */
+      let line;
+      line = svg.appendChild(document.createElementNS('http://www.w3.org/2000/svg', 'line'));
+      line.setAttribute('x1', 0);
+      line.setAttribute('x2', this.connectors.left);
+      line.setAttribute('y1', this.location.y);
+      line.setAttribute('y2', this.location.y);
+      line.setAttribute('stroke', 'black');
+      line.setAttribute('stroke-width', '2');
+      line = svg.appendChild(document.createElementNS('http://www.w3.org/2000/svg', 'line'));
+      line.setAttribute('x1', this.connectors.right);
+      line.setAttribute('x2', this.boundingBox.width);
+      line.setAttribute('y1', this.location.y);
+      line.setAttribute('y2', this.location.y);
+      line.setAttribute('stroke', 'black');
+      line.setAttribute('stroke-width', '2');
+    } else {
+      const line = svg.appendChild(document.createElementNS('http://www.w3.org/2000/svg', 'line'));
+      line.setAttribute('x1', 0);
+      line.setAttribute('x2', this.boundingBox.width);
+      line.setAttribute('y1', this.location.y);
+      line.setAttribute('y2', this.location.y);
+      line.setAttribute('stroke', 'black');
+      line.setAttribute('stroke-width', '2');
+    }
     return svg;
   }
 }

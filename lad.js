@@ -161,6 +161,12 @@ export class LADSeries extends LADShape {
       x += child.size.right;
       x += 20;
     }
+    if (this.children.length > 0) {
+      const firstChild = this.children[0];
+      this.innerSize.left = - firstChild.connectors.left;
+      const lastChild = this.children[this.children.length - 1];
+      this.innerSize.right = lastChild.connectors.right;
+    }
     this.size.right = x;
   }
   render(parent) {

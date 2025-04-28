@@ -19,7 +19,7 @@
 #ide table td:nth-child(3) {
   width: 25%;
 }
-#ide table button {
+#ide button {
   width: 100%;
   height: 100%;
   background-color: #f0f0f0;
@@ -27,10 +27,10 @@
   cursor: pointer;
   border-radius: 5px;
 }
-#ide table button:hover {
+#ide button:hover {
   background-color: #e0e0e0;
 }
-#ide table button:active {
+#ide button:active {
   background-color: #d0d0d0;
 }
 #ide-body {
