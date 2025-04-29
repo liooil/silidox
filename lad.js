@@ -21,6 +21,7 @@ export class LADShape {
     const g = parent.appendChild(
       document.createElementNS("http://www.w3.org/2000/svg", "g"),
     );
+    g.classList.add("shape");
     g.controller = this;
     this.node = g;
     g.setAttribute(
@@ -72,6 +73,16 @@ export class LADNode extends LADShape {
   }
   render(parent) {
     const g = super.render(parent);
+    const rect = g.appendChild(
+      document.createElementNS("http://www.w3.org/2000/svg", "rect"),
+    );
+    rect.classList.add("node-rect");
+    rect.setAttribute("x", -this.size.left);
+    rect.setAttribute("y", -this.size.top);
+    rect.setAttribute("width", this.size.left + this.size.right);
+    rect.setAttribute("height", this.size.top + this.size.bottom);
+    rect.setAttribute("fill", "white");
+    rect.setAttribute("stroke", "black");
     const text = g.appendChild(
       document.createElementNS("http://www.w3.org/2000/svg", "text"),
     );
@@ -168,6 +179,7 @@ export class LADNode extends LADShape {
 export class LADParallel extends LADShape {
   children = [];
   appendChild(child) {
+    child.gid = [this.gid, this.children.length].join(".");
     this.children.push(child);
     return this;
   }
@@ -178,6 +190,7 @@ export class LADSeries extends LADShape {
   /** @type {(LADParallel | LADNode)[]} */
   children = [];
   appendChild(child) {
+    child.gid = [this.gid, this.children.length].join(".");
     this.children.push(child);
     return this;
   }
@@ -237,5 +250,105 @@ export class LADSeries extends LADShape {
       line.setAttribute("fill", "none");
     }
     return g;
+  }
+}
+
+/**
+ * 梯级
+ */
+export class SILLad extends LADSeries {
+  constructor(gid = "") {
+    super();
+    this.gid = gid;
+  }
+  layout() {
+    if (this.children.length === 0) {
+      this.location.y = 20;
+      this.size.right = 200;
+      this.size.bottom = 40;
+    } else {
+      super.layout();
+    }
+  }
+  render(parent) {
+    const div = parent.appendChild(document.createElement("div"));
+    div.draggable = true;
+    div.onmousedown = (ev) => {
+      div.draggingNode = ev.target?.closest("g.shape");
+    };
+    div.onmouseup = (ev) => {
+      div.draggingNode = undefined;
+    };
+    div.ondragstart = (ev) => {
+      if (div.draggingNode) {
+        ev.dataTransfer.setData("gid", div.draggingNode.controller.gid);
+        ev.dataTransfer.effectAllowed = "move";
+        const boundingRect = div.draggingNode.getBoundingClientRect();
+        ev.dataTransfer.setDragImage(
+          div.draggingNode,
+          ev.clientX - boundingRect.left,
+          ev.clientY - boundingRect.top,
+        );
+        const trashBin = document.getElementById("trash-bin");
+        if (trashBin) {
+          trashBin.style.display = "block";
+        }
+        div.draggingNode = undefined;
+      } else {
+        ev.dataTransfer.setData("gid", this.gid);
+        ev.dataTransfer.effectAllowed = "move";
+        const trashBin = document.getElementById("trash-bin");
+        if (trashBin) {
+          trashBin.style.display = "block";
+        }
+      }
+    };
+    div.ondragend = (ev) => {
+      const trashBin = document.getElementById("trash-bin");
+      if (trashBin) {
+        trashBin.style.display = "none";
+      }
+    };
+    const svg = div.appendChild(
+      document.createElementNS("http://www.w3.org/2000/svg", "svg"),
+    );
+    svg.classList.add("lad");
+    svg.setAttribute("viewBox", `0 0 ${this.width} ${this.height}`);
+    svg.setAttribute("width", `100%`);
+    svg.setAttribute("preserveAspectRatio", "xMinYMin meet");
+    super.render(svg);
+    if (this.children.length > 0) {
+      /** @type {SVGLineElement} */
+      let line;
+      line = svg.appendChild(
+        document.createElementNS("http://www.w3.org/2000/svg", "line"),
+      );
+      line.setAttribute("x1", 0);
+      line.setAttribute("x2", this.connectors.left);
+      line.setAttribute("y1", this.location.y);
+      line.setAttribute("y2", this.location.y);
+      line.setAttribute("stroke", "black");
+      line.setAttribute("stroke-width", "2");
+      line = svg.appendChild(
+        document.createElementNS("http://www.w3.org/2000/svg", "line"),
+      );
+      line.setAttribute("x1", this.connectors.right);
+      line.setAttribute("x2", this.width);
+      line.setAttribute("y1", this.location.y);
+      line.setAttribute("y2", this.location.y);
+      line.setAttribute("stroke", "black");
+      line.setAttribute("stroke-width", "2");
+    } else {
+      const line = svg.appendChild(
+        document.createElementNS("http://www.w3.org/2000/svg", "line"),
+      );
+      line.setAttribute("x1", 0);
+      line.setAttribute("x2", this.width);
+      line.setAttribute("y1", this.location.y);
+      line.setAttribute("y2", this.location.y);
+      line.setAttribute("stroke", "black");
+      line.setAttribute("stroke-width", "2");
+    }
+    return svg;
   }
 }

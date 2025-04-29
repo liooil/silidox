@@ -1,4 +1,4 @@
-import { LADNode, LADSeries, LADParallel } from "./lad.js";
+import { LADNode, SILLad } from "./lad.js";
 
 export class IDE {
   vars = [
@@ -6,21 +6,21 @@ export class IDE {
     new SILVar("HEART", "BOOL").readonly(),
   ];
   lads = [
-    new SILLad()
+    new SILLad("0")
       .appendChild(LADNode.contact().operandOf("VAR_1"))
       .appendChild(LADNode.contact("closed").operandOf("VAR_1"))
       .appendChild(LADNode.coil().operandOf("VAR_2"))
       .appendChild(LADNode.coil("negated").operandOf("VAR_2")),
-    new SILLad()
+    new SILLad("1")
       .appendChild(LADNode.contact("positive").operandOf("VAR_1"))
       .appendChild(LADNode.contact("negative").operandOf("VAR_1"))
       .appendChild(LADNode.coil("positive").operandOf("VAR_2"))
       .appendChild(LADNode.coil("negative").operandOf("VAR_2")),
-    new SILLad()
+    new SILLad("2")
       .appendChild(LADNode.contact().operandOf("VAR_1"))
       .appendChild(LADNode.coil("set").operandOf("VAR_2"))
       .appendChild(LADNode.coil("reset").operandOf("VAR_2")),
-    new SILLad(),
+    new SILLad("3"),
   ];
   head = document.createElement("table");
   body = document.createElement("div");
@@ -74,6 +74,29 @@ export class IDE {
     addBtn.classList.add("add-lad");
     addBtn.onclick = () => {
       this.lads.push(new SILLad());
+      this.renderBody();
+    };
+    const trash = this.body.appendChild(document.createElement("div"));
+    trash.textContent = "删除";
+    trash.id = "trash-bin";
+    trash.style.display = "none";
+    trash.ondragover = (e) => {
+      e.preventDefault();
+    };
+    trash.ondrop = (e) => {
+      e.preventDefault();
+      const gid = e.dataTransfer.getData("gid");
+      let children = this.lads;
+      for (let i = 0; i < this.lads.length; i++) {
+        if (gid[i] === ".") {
+          const parent = children.find((p) => p.gid === gid.slice(0, i));
+          if (!parent) return;
+          children = parent.children;
+        }
+      }
+      const idx = children.findIndex((p) => p.gid === gid);
+      if (idx === -1) return;
+      children.splice(idx, 1);
       this.renderBody();
     };
   }
@@ -153,63 +176,5 @@ export class SILVar {
       cell.style.color = "gray";
       cell.style.cursor = "not-allowed";
     }
-  }
-}
-
-/**
- * 梯级
- */
-export class SILLad extends LADSeries {
-  layout() {
-    if (this.children.length === 0) {
-      this.location.y = 20;
-      this.size.right = 200;
-      this.size.bottom = 40;
-    } else {
-      super.layout();
-    }
-  }
-  render(parent) {
-    const svg = parent.appendChild(
-      document.createElementNS("http://www.w3.org/2000/svg", "svg"),
-    );
-    svg.classList.add("lad");
-    svg.setAttribute("viewBox", `0 0 ${this.width} ${this.height}`);
-    svg.setAttribute("width", `100%`);
-    svg.setAttribute("preserveAspectRatio", "xMinYMin meet");
-    super.render(svg);
-    if (this.children.length > 0) {
-      /** @type {SVGLineElement} */
-      let line;
-      line = svg.appendChild(
-        document.createElementNS("http://www.w3.org/2000/svg", "line"),
-      );
-      line.setAttribute("x1", 0);
-      line.setAttribute("x2", this.connectors.left);
-      line.setAttribute("y1", this.location.y);
-      line.setAttribute("y2", this.location.y);
-      line.setAttribute("stroke", "black");
-      line.setAttribute("stroke-width", "2");
-      line = svg.appendChild(
-        document.createElementNS("http://www.w3.org/2000/svg", "line"),
-      );
-      line.setAttribute("x1", this.connectors.right);
-      line.setAttribute("x2", this.width);
-      line.setAttribute("y1", this.location.y);
-      line.setAttribute("y2", this.location.y);
-      line.setAttribute("stroke", "black");
-      line.setAttribute("stroke-width", "2");
-    } else {
-      const line = svg.appendChild(
-        document.createElementNS("http://www.w3.org/2000/svg", "line"),
-      );
-      line.setAttribute("x1", 0);
-      line.setAttribute("x2", this.width);
-      line.setAttribute("y1", this.location.y);
-      line.setAttribute("y2", this.location.y);
-      line.setAttribute("stroke", "black");
-      line.setAttribute("stroke-width", "2");
-    }
-    return svg;
   }
 }
