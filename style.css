@@ -1,3 +1,7 @@
 body {
-    font-size: 15pt;
+    font-size: 16px;
+    font-family: monospace, sans-serif;
+    padding: 10px;
+    margin: 0;
+    background-color: #f9f9f9;
 }

@@ -1,50 +1,52 @@
 #ide table {
-  width: 100%;
-  height: 20px;
+    width: 100%;
+    height: 20px;
 }
 
 #ide table tr {
-  height: 20px;
+    height: 20px;
 }
 #ide table td {
-  padding: 0 5px;
-  text-align: center;
+    padding: 0 5px;
+    text-align: center;
 }
 #ide table td:nth-child(1) {
-  width: 50%;
+    width: 50%;
 }
 #ide table td:nth-child(2) {
-  width: 25%;
+    width: 25%;
 }
 #ide table td:nth-child(3) {
-  width: 25%;
+    width: 25%;
 }
 #ide button {
-  width: 100%;
-  height: 100%;
-  background-color: #f0f0f0;
-  border: none;
-  cursor: pointer;
-  border-radius: 5px;
+    width: 100%;
+    height: 100%;
+    background-color: #f0f0f0;
+    border: none;
+    cursor: pointer;
+    border-radius: 5px;
 }
 #ide button:hover {
-  background-color: #e0e0e0;
+    background-color: #e0e0e0;
 }
 #ide button:active {
-  background-color: #d0d0d0;
+    background-color: #d0d0d0;
 }
 #ide-body {
-  width: 100%;
-  height: 100%;
-  background-color: #f0f0f0;
+    width: 100%;
+    height: 100%;
+    background-color: #f0f0f0;
+}
+#ide hr {
+    border: 1px solid lightgray;
 }
 svg.lad {
-  font-size: 12px;
-  font-family: monospace;
-  border: 1px solid black;
+    font-size: 12px;
+    border: 1px solid black;
 }
 
 svg.lad line {
-  stroke-width: 1;
-  stroke: black;
+    stroke-width: 1;
+    stroke: black;
 }
