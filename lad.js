@@ -81,8 +81,6 @@ export class LADNode extends LADShape {
     rect.setAttribute("y", -this.size.top);
     rect.setAttribute("width", this.size.left + this.size.right);
     rect.setAttribute("height", this.size.top + this.size.bottom);
-    rect.setAttribute("fill", "white");
-    rect.setAttribute("stroke", "black");
     const text = g.appendChild(
       document.createElementNS("http://www.w3.org/2000/svg", "text"),
     );
@@ -129,9 +127,7 @@ export class LADNode extends LADShape {
     const icon = g.appendChild(
       document.createElementNS("http://www.w3.org/2000/svg", "text"),
     );
-    icon.setAttribute("text-anchor", "middle");
-    icon.setAttribute("dominant-baseline", "middle");
-    icon.setAttribute("font-size", "20px");
+    icon.classList.add("icon");
     if (this.type === "open") {
       icon.textContent = this.reverse ? "/" : " ";
     } else if (this.type === "set") {
@@ -270,6 +266,11 @@ export class SILLad extends LADSeries {
       super.layout();
     }
   }
+  /**
+   *
+   * @param {HTMLElement} parent
+   * @returns
+   */
   render(parent) {
     const div = parent.appendChild(document.createElement("div"));
     div.draggable = true;
@@ -277,12 +278,26 @@ export class SILLad extends LADSeries {
       div.draggingNode = ev.target?.closest("g.shape");
     };
     div.onmouseup = (ev) => {
+      if (!ev.ctrlKey) {
+        document
+          .querySelectorAll(".selected")
+          .forEach((n) => n.classList.remove("selected"));
+      }
+      if (div.draggingNode) div.draggingNode.classList.add("selected");
       div.draggingNode = undefined;
     };
+    div.addEventListener("touchstart", (ev) => {
+      div.draggingNode = ev.target?.closest("g.shape");
+    });
+    div.addEventListener("touchend", () => {
+      div.draggingNode.classList.add("selected");
+      div.draggingNode = undefined;
+    });
+
     div.ondragstart = (ev) => {
       if (div.draggingNode) {
         ev.dataTransfer.setData("gid", div.draggingNode.controller.gid);
-        ev.dataTransfer.effectAllowed = "move";
+        ev.dataTransfer.effectAllowed = "copyMove";
         const boundingRect = div.draggingNode.getBoundingClientRect();
         ev.dataTransfer.setDragImage(
           div.draggingNode,
@@ -296,7 +311,7 @@ export class SILLad extends LADSeries {
         div.draggingNode = undefined;
       } else {
         ev.dataTransfer.setData("gid", this.gid);
-        ev.dataTransfer.effectAllowed = "move";
+        ev.dataTransfer.effectAllowed = "copyMove";
         const trashBin = document.getElementById("trash-bin");
         if (trashBin) {
           trashBin.style.display = "block";

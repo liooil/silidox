@@ -35,20 +35,32 @@
 }
 #ide-body {
     width: 100%;
-    height: 100%;
-    background-color: #f0f0f0;
 }
 #ide hr {
     border: 1px solid lightgray;
 }
 svg.lad {
-    font-size: 12px;
-    border: 1px solid black;
+    background: transparent;
 }
 
 svg.lad line {
     stroke-width: 1;
     stroke: black;
+}
+
+g.shape rect {
+    fill: transparent;
+    stroke: none;
+    cursor: pointer;
+}
+g.shape.selected rect {
+    fill: lightblue;
+}
+
+g.shape text.icon {
+    text-anchor: middle;
+    dominant-baseline: middle;
+    user-select: none;
 }
 
 #trash-bin {
