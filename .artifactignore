@@ -1,0 +1,14 @@
+# 忽略开发/文档文件
+CLAUDE.md
+README.md
+*.md
+
+# 忽略类型声明
+*.d.ts
+
+# 忽略 git 相关
+.git/
+.gitignore
+
+# 忽略 workflow
+.github/
