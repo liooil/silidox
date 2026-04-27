@@ -136,6 +136,31 @@ export class LADNode extends LADShape {
       icon.textContent = this.reverse ? "N" : "P";
     }
   }
+  evaluateContact(vars, prevVars) {
+    const val = !!vars[this.operand];
+    if (this.type === 'open') {
+      return this.reverse ? !val : val;
+    }
+    if (this.type === 'rise') {
+      const prev = !!prevVars[this.operand];
+      return this.reverse ? (prev && !val) : (!prev && val);
+    }
+    return false;
+  }
+
+  evaluateCoil(vars, prevVars, rungState, prevRungState) {
+    if (this.type === 'open') {
+      vars[this.operand] = this.reverse ? !rungState : rungState;
+    } else if (this.type === 'set') {
+      if (rungState) vars[this.operand] = !this.reverse;
+    } else if (this.type === 'rise') {
+      const edge = this.reverse
+        ? (!rungState && prevRungState)
+        : (rungState && !prevRungState);
+      vars[this.operand] = edge;
+    }
+  }
+
   static contact(kind = "open") {
     const self = new LADNode();
     switch (kind) {
@@ -218,6 +243,30 @@ export class LADSeries extends LADShape {
    * Adjusts the width of the series layout by the given delta.
    * @param {number} dx The delta width to adjust.
    */
+  evaluate(vars, prevVars) {
+    const inputs = [];
+    const outputs = [];
+    for (const child of this.children) {
+      if (child.section === 'input') inputs.push(child);
+      else if (child.section === 'output') outputs.push(child);
+    }
+
+    let rungState = true;
+    for (const input of inputs) {
+      rungState = rungState && input.evaluateContact(vars, prevVars);
+      if (!rungState) break;
+    }
+
+    const rungKey = `__rung_${this.gid}__`;
+    const prevRungState = !!prevVars[rungKey];
+
+    for (const output of outputs) {
+      output.evaluateCoil(vars, prevVars, rungState, prevRungState);
+    }
+
+    vars[rungKey] = rungState;
+  }
+
   fitWidth(dx) {
     this.size.right += dx;
     this.innerSize.right += dx;

@@ -12,11 +12,10 @@ The game is pure vanilla JS with ES modules — no frameworks, no build tools, n
 
 ```bash
 # Serve locally (pick one):
-npx serve .           # needs Node
-python3 -m http.server 8080
+bun index.html
 ```
 
-Then open `http://localhost:8080` (or `http://localhost:3000` for `serve`).
+Then open `http://localhost:3000` in your browser.
 
 There are no tests, linting, or build steps.
 

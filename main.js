@@ -8,6 +8,14 @@ const engine = new Engine();
 const screen = new Screen();
 const ide = new IDE();
 
+for (const silvar of ide.vars) {
+  if (!(silvar.name in engine.vars)) {
+    engine.vars[silvar.name] = false;
+  }
+}
+
+engine.program = () => ide.evaluate(engine);
+
 const circle = screen.node;
 
 circle.onmousedown = () => {

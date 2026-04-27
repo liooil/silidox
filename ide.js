@@ -22,6 +22,7 @@ export class IDE {
       .appendChild(LADNode.coil("reset").operandOf("VAR_2")),
     new SILLad("3"),
   ];
+  mission = 'S00 开机自检：保持核心脉冲占空比 10%~30%，持续 3 秒';
   head = document.createElement("table");
   body = document.createElement("div");
 
@@ -38,6 +39,12 @@ export class IDE {
 
   renderHead() {
     this.head.innerHTML = "";
+    const missionRow = this.head.appendChild(document.createElement("tr"));
+    const missionCell = missionRow.appendChild(document.createElement("td"));
+    missionCell.colSpan = 3;
+    missionCell.textContent = this.mission;
+    missionCell.style.cssText = 'font-weight:bold;text-align:center;padding:4px 0;';
+    this._missionCell = missionCell;
     const headRow = this.head.appendChild(document.createElement("tr"));
     for (const name of ["名称", "类型", "值"]) {
       const cell = headRow.appendChild(document.createElement("th"));
@@ -54,7 +61,12 @@ export class IDE {
     const addBtn = addBtnCell.appendChild(document.createElement("button"));
     addBtn.textContent = "添加变量";
     addBtn.onclick = () => {
-      this.vars.push(new SILVar(this.getNextName("VAR_"), "BOOL", ""));
+      const name = this.getNextName("VAR_");
+      this.vars.push(new SILVar(name, "BOOL", ""));
+      const engine = document.getElementById('engine')?.controller;
+      if (engine && !(name in engine.vars)) {
+        engine.vars[name] = false;
+      }
       this.renderHead();
     };
   }
@@ -101,9 +113,19 @@ export class IDE {
     };
   }
 
-  monitor(values) {
+  evaluate(engine) {
+    for (const lad of this.lads) {
+      lad.evaluate(engine.vars, engine.prevVars);
+    }
+  }
+
+  monitor(values, engine) {
     for (const silvar of this.vars) {
       silvar.monitor(values[silvar.name]);
+    }
+    if (engine?.levelComplete && this._missionCell) {
+      this._missionCell.textContent = 'S00 开机自检：通过 ✓';
+      this._missionCell.style.color = 'green';
     }
   }
 
