@@ -1,54 +1,137 @@
 <!doctype html>
-<html lang="en">
-    <head>
-        <meta charset="UTF-8" />
-        <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-
-        <title>硅基问道</title>
-
-        <!-- HTML -->
-
-        <link rel="stylesheet" href="style.css" />
-        <link rel="stylesheet" href="screen.css" />
-        <link rel="stylesheet" href="ide.css" />
-    </head>
-
-    <body>
-        <div id="app">
-            <div id="engine"></div>
-            <svg id="screen" viewBox="0 0 100 100" width="100" height="100">
-                <defs>
-                    <mask id="circle-mask">
-                        <circle cx="50" cy="50" r="40" fill="white" />
-                    </mask>
-                    <image
-                        id="circult"
-                        href="./circult.svg"
-                        x="0"
-                        y="0"
-                        width="100"
-                        height="100"
-                    />
-                </defs>
-                <use
-                    href="#circult"
-                    x="0"
-                    y="0"
-                    width="100"
-                    height="100"
-                    mask="url(#circle-mask)"
-                />
-            </svg>
-            <div id="ide"></div>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Silidox：修仙一定要灵根吗？MVP</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Silidox boot shard // epoch 0x0001</p>
+          <h1>修仙一定要灵根吗？</h1>
         </div>
-        <script src="main.js" type="module"></script>
-        <script src="./site-nav.js"></script>
-        <script>
-        SilidoxSiteNav({
-            repoUrl: "https://github.com/liooil/silidox",
-            homeUrl: "https://liooil.github.io/"
-        });
-        </script>
-    </body>
+        <div class="system-readout" aria-live="polite">
+          <span id="epochState">纪元稳定</span>
+          <strong id="woodCount">木材 0 / 3</strong>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <section class="panel manual-panel" aria-labelledby="manualTitle">
+          <div class="panel-header">
+            <div>
+              <p class="panel-kicker">破损文档</p>
+              <h2 id="manualTitle">通用机器操作手册</h2>
+            </div>
+            <span class="chip">Ladder-0</span>
+          </div>
+
+          <div class="manual-block">
+            <h3>输入引脚</h3>
+            <dl class="pin-list">
+              <div><dt>I0</dt><dd>FRONT_BLOCKED</dd></div>
+              <div><dt>I1</dt><dd>FRONT_TREE</dd></div>
+              <div><dt>I2</dt><dd>CARGO_FULL</dd></div>
+              <div><dt>I3</dt><dd>AT_HOME</dd></div>
+              <div><dt>I4</dt><dd>HOME_VECTOR_AHEAD</dd></div>
+              <div><dt>I5</dt><dd>LAST_COLLISION</dd></div>
+              <div><dt>I6</dt><dd>HEAVEN_JITTER</dd></div>
+              <div><dt>I7</dt><dd>FRONT_EMPTY</dd></div>
+            </dl>
+          </div>
+
+          <div class="manual-block">
+            <h3>输出线圈</h3>
+            <dl class="pin-list">
+              <div><dt>Q0</dt><dd>MOVE</dd></div>
+              <div><dt>Q1</dt><dd>TURN_RIGHT</dd></div>
+              <div><dt>Q2</dt><dd>CHOP</dd></div>
+              <div><dt>Q3</dt><dd>DEPOSIT</dd></div>
+              <div><dt>Q4</dt><dd>WAIT</dd></div>
+            </dl>
+          </div>
+
+          <div class="manual-block syntax">
+            <h3>残页语法</h3>
+            <pre>XIC I1 XIO I2 OTE Q2
+XIO I0 XIO I1 OTE Q0</pre>
+            <p>XIC 为常开触点，XIO 为常闭触点，OTE 给线圈上电。每行是一个 rung。</p>
+          </div>
+
+          <div class="objective">
+            <span>当前执念</span>
+            <p id="objectiveText">盲态伐木，回收 3 份木材，拼出第一只光电传感器。</p>
+          </div>
+        </section>
+
+        <section class="panel terminal-panel" aria-labelledby="terminalTitle">
+          <div class="panel-header">
+            <div>
+              <p class="panel-kicker">headless terminal</p>
+              <h2 id="terminalTitle">底层控制台</h2>
+            </div>
+            <div class="toolbar" aria-label="控制">
+              <button id="compileBtn" title="编译梯形图">⚙ 编译</button>
+              <button id="stepBtn" title="运行一个 tick">▶ 1</button>
+              <button id="runBtn" title="运行三十个 tick">▶ 30</button>
+              <button id="resetBtn" title="保留代码并重启当前纪元">↻ 轮回</button>
+            </div>
+          </div>
+
+          <label class="editor-label" for="programEditor">startup_sequence.lad</label>
+          <textarea id="programEditor" spellcheck="false"></textarea>
+
+          <div class="terminal-footer">
+            <div class="sensor-bank" id="sensorBank" aria-label="传感器状态"></div>
+            <div class="log-window" id="logWindow" aria-live="polite"></div>
+          </div>
+        </section>
+
+        <section class="panel perception-panel" aria-labelledby="perceptionTitle">
+          <div class="panel-header">
+            <div>
+              <p class="panel-kicker">perception bus</p>
+              <h2 id="perceptionTitle">物理世界</h2>
+            </div>
+            <span class="chip" id="cameraChip">NO SENSOR</span>
+          </div>
+
+          <div class="monitor-wrap">
+            <canvas id="worldCanvas" width="440" height="320" aria-label="低像素监控窗口"></canvas>
+            <div class="blind-overlay" id="blindOverlay">
+              <strong>HEADLESS</strong>
+              <span>Collision / Pin / Log only</span>
+            </div>
+          </div>
+
+          <div class="metrics">
+            <div>
+              <span>tick</span>
+              <strong id="tickReadout">0</strong>
+            </div>
+            <div>
+              <span>energy</span>
+              <strong id="energyReadout">100</strong>
+            </div>
+            <div>
+              <span>float drift</span>
+              <strong id="driftReadout">0e+0</strong>
+            </div>
+          </div>
+
+          <div class="legend">
+            <span><i class="swatch bot"></i>Silidox</span>
+            <span><i class="swatch home"></i>Home</span>
+            <span><i class="swatch tree"></i>Wood</span>
+            <span><i class="swatch rock"></i>Stone</span>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="./src/app.js"></script>
+  </body>
 </html>
