@@ -18,16 +18,8 @@ const OUTPUTS = {
 };
 
 const ACTION_PRIORITY = ["Q3", "Q2", "Q1", "Q0", "Q4"];
-
-const DEFAULT_PROGRAM = `; Silidox / startup_sequence.lad
-; contacts: XIC=true, XIO=false, coil: OTE
-
-XIC I2 XIC I3 OTE Q3      ; cargo at home -> deposit
-XIC I1 XIO I2 OTE Q2      ; tree ahead and empty -> chop
-XIC I2 XIO I3 XIC I4 OTE Q0
-XIC I2 XIO I4 OTE Q1      ; rotate until home vector is ahead
-XIO I0 XIO I1 XIO I2 OTE Q0
-XIC I0 XIO I2 OTE Q1`;
+const LADDER_STORAGE_KEY = "silidox.ladder.v1";
+const LEGACY_PROGRAM_KEY = "silidox.program";
 
 const WORLD_TEMPLATE = [
   "###########",
@@ -47,11 +39,21 @@ const DIRS = [
 ];
 
 const els = {
-  editor: document.querySelector("#programEditor"),
   compileBtn: document.querySelector("#compileBtn"),
   stepBtn: document.querySelector("#stepBtn"),
   runBtn: document.querySelector("#runBtn"),
   resetBtn: document.querySelector("#resetBtn"),
+  addRungBtn: document.querySelector("#addRungBtn"),
+  addOpenContactBtn: document.querySelector("#addOpenContactBtn"),
+  addClosedContactBtn: document.querySelector("#addClosedContactBtn"),
+  addCoilBtn: document.querySelector("#addCoilBtn"),
+  deleteNodeBtn: document.querySelector("#deleteNodeBtn"),
+  moveLeftBtn: document.querySelector("#moveLeftBtn"),
+  moveRightBtn: document.querySelector("#moveRightBtn"),
+  contactOpSelect: document.querySelector("#contactOpSelect"),
+  pinSelect: document.querySelector("#pinSelect"),
+  coilSelect: document.querySelector("#coilSelect"),
+  rungList: document.querySelector("#rungList"),
   logWindow: document.querySelector("#logWindow"),
   sensorBank: document.querySelector("#sensorBank"),
   worldCanvas: document.querySelector("#worldCanvas"),
@@ -67,65 +69,20 @@ const els = {
 
 const ctx = els.worldCanvas.getContext("2d");
 
+let nextRungId = 1;
 let state = createInitialState();
-let compiled = { ok: false, rungs: [], diagnostics: [] };
+let ladder = loadLadder();
+syncNextRungId(ladder);
+let selectedNode = firstSelectable(ladder);
+let compiled = compileLadder(ladder);
 let runTimer = null;
 let logScrollFrame = null;
+let activeDraggedTool = "";
 
-els.editor.value = localStorage.getItem("silidox.program") || DEFAULT_PROGRAM;
-
-for (const [pin, name] of PINS) {
-  const node = document.createElement("div");
-  node.className = "sensor";
-  node.dataset.pin = pin;
-  node.innerHTML = `<span>${pin} ${name}</span><strong>0</strong>`;
-  els.sensorBank.appendChild(node);
-}
-
-els.editor.addEventListener("input", () => {
-  localStorage.setItem("silidox.program", els.editor.value);
-});
-
-els.compileBtn.addEventListener("click", () => {
-  compileAndReport();
-  render();
-});
-
-els.stepBtn.addEventListener("click", () => {
-  stopRun();
-  if (compileAndReport()) tick();
-});
-
-els.runBtn.addEventListener("click", () => {
-  if (runTimer) {
-    stopRun();
-    return;
-  }
-  if (!compileAndReport()) return;
-  let remaining = 30;
-  const cameraAtRunStart = state.cameraUnlocked;
-  els.runBtn.textContent = "■ 停止";
-  runTimer = window.setInterval(() => {
-    if (remaining <= 0 || state.halted) {
-      stopRun();
-      return;
-    }
-    tick();
-    if (!cameraAtRunStart && state.cameraUnlocked) {
-      stopRun();
-      return;
-    }
-    remaining -= 1;
-  }, 130);
-});
-
-els.resetBtn.addEventListener("click", () => {
-  stopRun();
-  state = createInitialState();
-  log("good", "local code shard retained; epoch rebooted");
-  compileAndReport();
-  render();
-});
+populateInspectorOptions();
+renderSensorBank();
+wireEditorEvents();
+wireRunEvents();
 
 compileAndReport();
 render();
@@ -158,8 +115,448 @@ function createInitialState() {
   };
 }
 
+function createDefaultLadder() {
+  return [
+    createRung(
+      [
+        { op: "XIC", pin: "I2" },
+        { op: "XIC", pin: "I3" },
+      ],
+      "Q3",
+    ),
+    createRung(
+      [
+        { op: "XIC", pin: "I1" },
+        { op: "XIO", pin: "I2" },
+      ],
+      "Q2",
+    ),
+    createRung(
+      [
+        { op: "XIC", pin: "I2" },
+        { op: "XIO", pin: "I3" },
+        { op: "XIC", pin: "I4" },
+      ],
+      "Q0",
+    ),
+    createRung(
+      [
+        { op: "XIC", pin: "I2" },
+        { op: "XIO", pin: "I4" },
+      ],
+      "Q1",
+    ),
+    createRung(
+      [
+        { op: "XIO", pin: "I0" },
+        { op: "XIO", pin: "I1" },
+        { op: "XIO", pin: "I2" },
+      ],
+      "Q0",
+    ),
+    createRung(
+      [
+        { op: "XIC", pin: "I0" },
+        { op: "XIO", pin: "I2" },
+      ],
+      "Q1",
+    ),
+  ];
+}
+
+function createRung(contacts = [{ op: "XIC", pin: "I0" }], coil = "Q4", id = allocateRungId()) {
+  return {
+    id,
+    contacts: contacts.map((contact) => ({
+      op: contact.op === "XIO" ? "XIO" : "XIC",
+      pin: isKnownPin(contact.pin) ? contact.pin : "I0",
+    })),
+    coil: OUTPUTS[coil] ? coil : "Q4",
+  };
+}
+
+function allocateRungId() {
+  const id = `rung-${nextRungId}`;
+  nextRungId += 1;
+  return id;
+}
+
+function syncNextRungId(program) {
+  const highest = program.reduce((max, rung) => {
+    const match = /^rung-(\d+)$/.exec(rung.id || "");
+    return match ? Math.max(max, Number(match[1])) : max;
+  }, 0);
+  nextRungId = Math.max(nextRungId, highest + 1);
+}
+
+function loadLadder() {
+  const stored = localStorage.getItem(LADDER_STORAGE_KEY);
+  if (stored) {
+    try {
+      return normalizeLadder(JSON.parse(stored));
+    } catch {
+      localStorage.removeItem(LADDER_STORAGE_KEY);
+    }
+  }
+
+  const legacy = localStorage.getItem(LEGACY_PROGRAM_KEY);
+  if (legacy) {
+    const parsed = parseLegacyProgram(legacy);
+    if (parsed.length > 0) return normalizeLadder(parsed);
+  }
+
+  return createDefaultLadder();
+}
+
+function normalizeLadder(value) {
+  if (!Array.isArray(value)) return createDefaultLadder();
+  const normalized = value
+    .map((rung) => createRung(rung.contacts, rung.coil, rung.id || allocateRungId()))
+    .filter((rung) => rung.contacts.length > 0);
+  return normalized.length > 0 ? normalized : createDefaultLadder();
+}
+
+function parseLegacyProgram(source) {
+  const rungs = [];
+  for (const raw of source.split(/\r?\n/)) {
+    const cleaned = raw.replace(/[;#].*$/, "").trim();
+    if (!cleaned) continue;
+
+    const tokens = cleaned.toUpperCase().split(/\s+/);
+    if (tokens.length < 3 || tokens[tokens.length - 2] !== "OTE") continue;
+
+    const coil = tokens[tokens.length - 1];
+    if (!OUTPUTS[coil]) continue;
+
+    const contactTokens = tokens.slice(0, -2);
+    if (contactTokens.length % 2 !== 0) continue;
+
+    const contacts = [];
+    for (let i = 0; i < contactTokens.length; i += 2) {
+      const op = contactTokens[i];
+      const pin = contactTokens[i + 1];
+      if ((op === "XIC" || op === "XIO") && isKnownPin(pin)) {
+        contacts.push({ op, pin });
+      }
+    }
+
+    if (contacts.length > 0) rungs.push(createRung(contacts, coil));
+  }
+  return rungs;
+}
+
+function saveLadder() {
+  localStorage.setItem(LADDER_STORAGE_KEY, JSON.stringify(ladder));
+}
+
+function firstSelectable(program) {
+  const rung = program[0];
+  if (!rung) return null;
+  return { rungId: rung.id, type: "contact", index: 0 };
+}
+
+function populateInspectorOptions() {
+  for (const [pin, name] of PINS) {
+    const option = document.createElement("option");
+    option.value = pin;
+    option.textContent = `${pin} ${name}`;
+    els.pinSelect.appendChild(option);
+  }
+
+  for (const [pin, name] of Object.entries(OUTPUTS)) {
+    const option = document.createElement("option");
+    option.value = pin;
+    option.textContent = `${pin} ${name}`;
+    els.coilSelect.appendChild(option);
+  }
+}
+
+function renderSensorBank() {
+  for (const [pin, name] of PINS) {
+    const node = document.createElement("div");
+    node.className = "sensor";
+    node.dataset.pin = pin;
+
+    const label = node.appendChild(document.createElement("span"));
+    label.textContent = `${pin} ${name}`;
+
+    const value = node.appendChild(document.createElement("strong"));
+    value.textContent = "0";
+
+    els.sensorBank.appendChild(node);
+  }
+}
+
+function wireEditorEvents() {
+  const toolButtons = [
+    [els.addRungBtn, "rung"],
+    [els.addOpenContactBtn, "contact-open"],
+    [els.addClosedContactBtn, "contact-closed"],
+    [els.addCoilBtn, "coil"],
+    [els.deleteNodeBtn, "delete"],
+    [els.moveLeftBtn, "move-left"],
+    [els.moveRightBtn, "move-right"],
+  ];
+
+  for (const [button, tool] of toolButtons) {
+    button.dataset.tool = button.dataset.tool || tool;
+    button.addEventListener("click", () => applyTool(button.dataset.tool));
+
+    if (button.draggable) {
+      button.addEventListener("dragstart", (event) => {
+        activeDraggedTool = button.dataset.tool;
+        event.dataTransfer.setData("text/plain", button.dataset.tool);
+        event.dataTransfer.effectAllowed = "copy";
+      });
+
+      button.addEventListener("dragend", () => {
+        activeDraggedTool = "";
+      });
+    }
+  }
+
+  els.rungList.addEventListener("dragover", (event) => {
+    if (!event.target.closest(".rung-row") && isToolDrag(event)) {
+      event.preventDefault();
+      els.rungList.classList.add("drop-target");
+    }
+  });
+
+  els.rungList.addEventListener("dragleave", (event) => {
+    if (!els.rungList.contains(event.relatedTarget)) {
+      els.rungList.classList.remove("drop-target");
+    }
+  });
+
+  els.rungList.addEventListener("drop", (event) => {
+    const tool = draggedTool(event);
+    els.rungList.classList.remove("drop-target");
+    activeDraggedTool = "";
+    if (!tool || event.target.closest(".rung-row")) return;
+    event.preventDefault();
+    applyTool(tool);
+  });
+
+  els.contactOpSelect.addEventListener("change", () => {
+    const context = ensureSelection();
+    if (!context || selectedNode.type !== "contact") return;
+    context.rung.contacts[selectedNode.index].op = els.contactOpSelect.value;
+    onLadderChanged();
+  });
+
+  els.pinSelect.addEventListener("change", () => {
+    const context = ensureSelection();
+    if (!context || selectedNode.type !== "contact") return;
+    context.rung.contacts[selectedNode.index].pin = els.pinSelect.value;
+    onLadderChanged();
+  });
+
+  els.coilSelect.addEventListener("change", () => {
+    const context = ensureSelection();
+    if (!context || selectedNode.type !== "coil") return;
+    context.rung.coil = els.coilSelect.value;
+    onLadderChanged();
+  });
+}
+
+function applyTool(tool, drop = null) {
+  if (tool === "rung") {
+    addRungAfter(drop?.rungId);
+    return;
+  }
+
+  if (tool === "contact-open") {
+    insertContact("XIC", drop);
+    return;
+  }
+
+  if (tool === "contact-closed") {
+    insertContact("XIO", drop);
+    return;
+  }
+
+  if (tool === "coil") {
+    selectCoil(drop?.rungId);
+    return;
+  }
+
+  if (tool === "delete") {
+    deleteSelection();
+    return;
+  }
+
+  if (tool === "move-left") {
+    moveSelectedContact(-1);
+    return;
+  }
+
+  if (tool === "move-right") {
+    moveSelectedContact(1);
+  }
+}
+
+function draggedTool(event) {
+  return event.dataTransfer?.getData("text/plain") || activeDraggedTool || "";
+}
+
+function isToolDrag(event) {
+  return Boolean(
+    activeDraggedTool ||
+      Array.from(event.dataTransfer?.types || []).some((type) => type === "text/plain"),
+  );
+}
+
+function addRungAfter(rungId = selectedNode?.rungId) {
+  const rung = createRung();
+  const index = ladder.findIndex((item) => item.id === rungId);
+  ladder.splice(index === -1 ? ladder.length : index + 1, 0, rung);
+  selectedNode = { rungId: rung.id, type: "contact", index: 0 };
+  onLadderChanged();
+}
+
+function insertContact(op, drop = null) {
+  const context = ensureSelectionForRung(drop?.rungId);
+  if (!context) return;
+
+  const insertAt =
+    typeof drop?.insertAt === "number" ? drop.insertAt : selectedInsertIndex(context.rung);
+  const index = Math.min(Math.max(0, insertAt), context.rung.contacts.length);
+  context.rung.contacts.splice(index, 0, { op, pin: "I0" });
+  selectedNode = { rungId: context.rung.id, type: "contact", index };
+  onLadderChanged();
+}
+
+function selectedInsertIndex(rung) {
+  if (selectedNode?.rungId !== rung.id) return rung.contacts.length;
+  if (selectedNode.type === "contact") return selectedNode.index + 1;
+  return rung.contacts.length;
+}
+
+function selectCoil(rungId = selectedNode?.rungId) {
+  const context = ensureSelectionForRung(rungId);
+  if (!context) return;
+
+  selectedNode = { rungId: context.rung.id, type: "coil" };
+  render();
+}
+
+function deleteSelection() {
+  const context = ensureSelection();
+  if (!context) return;
+
+  if (selectedNode.type === "rung") {
+    if (ladder.length <= 1) return;
+    ladder.splice(context.rungIndex, 1);
+    selectedNode = firstSelectable(ladder);
+    onLadderChanged();
+    return;
+  }
+
+  if (selectedNode.type !== "contact" || context.rung.contacts.length <= 1) return;
+
+  context.rung.contacts.splice(selectedNode.index, 1);
+  selectedNode.index = Math.max(0, selectedNode.index - 1);
+  onLadderChanged();
+}
+
+function wireRunEvents() {
+  els.compileBtn.addEventListener("click", () => {
+    compileAndReport();
+    render();
+  });
+
+  els.stepBtn.addEventListener("click", () => {
+    stopRun();
+    if (compileAndReport()) tick();
+  });
+
+  els.runBtn.addEventListener("click", () => {
+    if (runTimer) {
+      stopRun();
+      return;
+    }
+    if (!compileAndReport()) return;
+
+    let remaining = 30;
+    const cameraAtRunStart = state.cameraUnlocked;
+    els.runBtn.textContent = "停止";
+    runTimer = window.setInterval(() => {
+      if (remaining <= 0 || state.halted) {
+        stopRun();
+        return;
+      }
+      tick();
+      if (!cameraAtRunStart && state.cameraUnlocked) {
+        stopRun();
+        return;
+      }
+      remaining -= 1;
+    }, 130);
+  });
+
+  els.resetBtn.addEventListener("click", () => {
+    stopRun();
+    state = createInitialState();
+    log("good", "local ladder retained; epoch rebooted");
+    compileAndReport();
+    render();
+  });
+}
+
+function moveSelectedContact(direction) {
+  const context = ensureSelection();
+  if (!context || selectedNode.type !== "contact") return;
+
+  const from = selectedNode.index;
+  const to = from + direction;
+  if (to < 0 || to >= context.rung.contacts.length) return;
+
+  const [contact] = context.rung.contacts.splice(from, 1);
+  context.rung.contacts.splice(to, 0, contact);
+  selectedNode.index = to;
+  onLadderChanged();
+}
+
+function ensureSelection() {
+  if (ladder.length === 0) {
+    const rung = createRung();
+    ladder.push(rung);
+    selectedNode = { rungId: rung.id, type: "contact", index: 0 };
+  }
+
+  let rungIndex = ladder.findIndex((rung) => rung.id === selectedNode?.rungId);
+  if (rungIndex === -1) {
+    selectedNode = firstSelectable(ladder);
+    rungIndex = 0;
+  }
+
+  const rung = ladder[rungIndex];
+  if (!selectedNode) return null;
+
+  if (selectedNode.type === "contact") {
+    selectedNode.index = Math.min(Math.max(0, selectedNode.index), rung.contacts.length - 1);
+  }
+
+  return { rung, rungIndex };
+}
+
+function ensureSelectionForRung(rungId) {
+  if (!rungId) return ensureSelection();
+
+  const rungIndex = ladder.findIndex((rung) => rung.id === rungId);
+  if (rungIndex === -1) return ensureSelection();
+
+  return { rung: ladder[rungIndex], rungIndex };
+}
+
+function onLadderChanged() {
+  saveLadder();
+  compiled = compileLadder(ladder);
+  render();
+}
+
 function compileAndReport() {
-  compiled = compileProgram(els.editor.value);
+  compiled = compileLadder(ladder);
   if (compiled.ok) {
     log("good", `compiled ${compiled.rungs.length} rung(s)`);
     return true;
@@ -172,55 +569,46 @@ function compileAndReport() {
   return false;
 }
 
-function compileProgram(source) {
+function compileLadder(program) {
   const rungs = [];
   const diagnostics = [];
-  const lines = source.split(/\r?\n/);
 
-  lines.forEach((raw, index) => {
-    const cleaned = raw.replace(/[;#].*$/, "").trim();
-    if (!cleaned) return;
-
-    const tokens = cleaned.toUpperCase().split(/\s+/);
+  program.forEach((rung, index) => {
     const lineNo = index + 1;
+    const before = diagnostics.length;
 
-    if (tokens.length < 3 || tokens[tokens.length - 2] !== "OTE") {
-      diagnostics.push(`line ${lineNo}: expected "... OTE Qn"`);
-      return;
-    }
-
-    const coil = tokens[tokens.length - 1];
-    if (!OUTPUTS[coil]) {
-      diagnostics.push(`line ${lineNo}: unknown coil ${coil}`);
-      return;
-    }
-
-    const contactTokens = tokens.slice(0, -2);
-    if (contactTokens.length % 2 !== 0) {
-      diagnostics.push(`line ${lineNo}: contact missing pin`);
-      return;
+    if (!rung.contacts || rung.contacts.length === 0) {
+      diagnostics.push(`R${lineNo}: missing contact`);
     }
 
     const contacts = [];
-    for (let i = 0; i < contactTokens.length; i += 2) {
-      const op = contactTokens[i];
-      const pin = contactTokens[i + 1];
-      if (op !== "XIC" && op !== "XIO") {
-        diagnostics.push(`line ${lineNo}: unknown contact ${op}`);
+    for (const contact of rung.contacts || []) {
+      if (contact.op !== "XIC" && contact.op !== "XIO") {
+        diagnostics.push(`R${lineNo}: unknown contact ${contact.op}`);
         continue;
       }
-      if (!PINS.some(([knownPin]) => knownPin === pin)) {
-        diagnostics.push(`line ${lineNo}: unknown input ${pin}`);
+      if (!isKnownPin(contact.pin)) {
+        diagnostics.push(`R${lineNo}: unknown input ${contact.pin}`);
         continue;
       }
-      contacts.push({ op, pin });
+      contacts.push({ op: contact.op, pin: contact.pin });
     }
 
-    rungs.push({ lineNo, contacts, coil, raw: cleaned });
+    if (!OUTPUTS[rung.coil]) {
+      diagnostics.push(`R${lineNo}: unknown coil ${rung.coil}`);
+    }
+
+    if (diagnostics.length === before && contacts.length > 0) {
+      rungs.push({ id: rung.id, lineNo, contacts, coil: rung.coil });
+    }
   });
 
   if (rungs.length === 0) diagnostics.push("no energized logic found");
   return { ok: diagnostics.length === 0, rungs, diagnostics };
+}
+
+function isKnownPin(pin) {
+  return PINS.some(([knownPin]) => knownPin === pin);
 }
 
 function tick() {
@@ -265,20 +653,20 @@ function readSensors() {
   const blocked = cell === "#";
   const tree = cell === "T";
   const cargoFull = state.robot.cargo >= 1;
-  const atHome = state.robot.x === state.home.x && state.robot.y === state.home.y;
+  const atHomeNow = atHome();
   const dir = DIRS[state.robot.dir];
   const currentDistance = manhattan(state.robot, state.home);
   const nextDistance = manhattan(
     { x: state.robot.x + dir.dx, y: state.robot.y + dir.dy },
     state.home,
   );
-  const homeVectorAhead = atHome || nextDistance < currentDistance;
+  const homeVectorAhead = atHomeNow || nextDistance < currentDistance;
 
   return {
     I0: blocked,
     I1: tree,
     I2: cargoFull,
-    I3: atHome,
+    I3: atHomeNow,
     I4: homeVectorAhead,
     I5: state.lastCollision,
     I6: state.tick % 8 === 0,
@@ -289,13 +677,18 @@ function readSensors() {
 function evaluateRungs(sensors) {
   const active = [];
   for (const rung of compiled.rungs) {
-    const energized = rung.contacts.every((contact) => {
-      const value = Boolean(sensors[contact.pin]);
-      return contact.op === "XIC" ? value : !value;
-    });
-    if (energized && !active.includes(rung.coil)) active.push(rung.coil);
+    if (isRungEnergized(rung, sensors) && !active.includes(rung.coil)) {
+      active.push(rung.coil);
+    }
   }
   return active;
+}
+
+function isRungEnergized(rung, sensors) {
+  return rung.contacts.every((contact) => {
+    const value = Boolean(sensors[contact.pin]);
+    return contact.op === "XIC" ? value : !value;
+  });
 }
 
 function applyAction(coil) {
@@ -352,9 +745,239 @@ function applyAction(coil) {
 function render() {
   const sensors = readSensors();
   renderSensors(sensors);
+  renderEditor(sensors);
   renderLog();
   renderCanvas();
   renderMetrics();
+}
+
+function renderEditor(sensors) {
+  ensureSelection();
+  updateInspector();
+  els.rungList.innerHTML = "";
+
+  const width = ladder.reduce((max, rung) => Math.max(max, diagramWidth(rung)), 360);
+  const energized = new Set(
+    compiled.rungs
+      .filter((rung) => isRungEnergized(rung, sensors))
+      .map((rung) => rung.id),
+  );
+
+  for (let index = 0; index < ladder.length; index += 1) {
+    const rung = ladder[index];
+    renderRungRow({ rung, index, width }, energized.has(rung.id));
+  }
+}
+
+function diagramWidth(rung) {
+  return 76 + rung.contacts.length * 92 + 108;
+}
+
+function renderRungRow({ rung, index, width }, energized) {
+  const row = els.rungList.appendChild(document.createElement("article"));
+  row.className = "rung-row";
+  row.classList.toggle("energized", energized);
+  row.classList.toggle("selected", selectedNode?.rungId === rung.id);
+  row.style.width = `${width + 20}px`;
+
+  const header = row.appendChild(document.createElement("div"));
+  header.className = "rung-row-header";
+  header.addEventListener("click", () => {
+    selectedNode = { rungId: rung.id, type: "rung" };
+    renderEditor(readSensors());
+  });
+
+  const title = header.appendChild(document.createElement("strong"));
+  title.textContent = `R${index + 1}`;
+
+  const status = header.appendChild(document.createElement("span"));
+  status.className = "rung-state";
+  status.textContent = energized ? "ON" : "OFF";
+
+  const diagram = row.appendChild(document.createElement("div"));
+  diagram.className = "rung-diagram";
+  const svg = renderLadDiagram(diagram, rung, width);
+
+  markSelectedShape(diagram, rung);
+  svg.addEventListener("click", (event) => {
+    const shape = event.target.closest("g.shape");
+    if (!shape) {
+      selectedNode = { rungId: rung.id, type: "rung" };
+      renderEditor(readSensors());
+      return;
+    }
+
+    if (shape.dataset.kind === "contact") {
+      const childIndex = Number(shape.dataset.index);
+      selectedNode = { rungId: rung.id, type: "contact", index: childIndex };
+    } else if (shape.dataset.kind === "coil") {
+      selectedNode = { rungId: rung.id, type: "coil" };
+    } else {
+      selectedNode = { rungId: rung.id, type: "rung" };
+    }
+    renderEditor(readSensors());
+  });
+
+  row.addEventListener("dragover", (event) => {
+    if (!isToolDrag(event)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    row.classList.add("drop-target");
+  });
+
+  row.addEventListener("dragleave", (event) => {
+    if (!row.contains(event.relatedTarget)) {
+      row.classList.remove("drop-target");
+    }
+  });
+
+  row.addEventListener("drop", (event) => {
+    const tool = draggedTool(event);
+    row.classList.remove("drop-target");
+    activeDraggedTool = "";
+    if (!tool) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    applyTool(tool, dropContextFromEvent(event, rung));
+  });
+}
+
+function dropContextFromEvent(event, rung) {
+  const shape = event.target.closest("g.shape");
+  if (!shape) return { rungId: rung.id, insertAt: rung.contacts.length };
+
+  if (shape.dataset.kind === "contact") {
+    return { rungId: rung.id, insertAt: Number(shape.dataset.index) + 1 };
+  }
+
+  return { rungId: rung.id, insertAt: rung.contacts.length };
+}
+
+function renderLadDiagram(parent, rung, width) {
+  const shell = parent.appendChild(document.createElement("div"));
+  shell.className = "lad-svg-shell";
+  shell.style.width = `${width}px`;
+
+  const svg = shell.appendChild(createSvg("svg"));
+  svg.classList.add("lad");
+  svg.setAttribute("viewBox", `0 0 ${width} 78`);
+  svg.setAttribute("width", String(width));
+  svg.setAttribute("height", "78");
+  svg.setAttribute("preserveAspectRatio", "xMinYMin meet");
+
+  const y = 44;
+  line(svg, 8, 12, 8, 68, "2");
+  line(svg, width - 8, 12, width - 8, 68, "2");
+  line(svg, 8, y, width - 8, y, "1");
+
+  for (let index = 0; index < rung.contacts.length; index += 1) {
+    renderContact(svg, 58 + index * 92, y, rung.contacts[index], index);
+  }
+  renderCoil(svg, width - 66, y, rung.coil);
+
+  return svg;
+}
+
+function renderContact(svg, x, y, contact, index) {
+  const g = shapeGroup(svg, x, y, "contact", index);
+  label(g, contact.pin, -20);
+  path(g, "M-10,-10 L-10,10");
+  path(g, "M10,-10 L10,10");
+  if (contact.op === "XIO") {
+    path(g, "M-17,13 L17,-13").classList.add("node-mark");
+  }
+}
+
+function renderCoil(svg, x, y, coil) {
+  const g = shapeGroup(svg, x, y, "coil");
+  label(g, coil, -20);
+  path(g, "M-7,-10 C-13,-8 -13,8 -7,10");
+  path(g, "M7,-10 C13,-8 13,8 7,10");
+}
+
+function shapeGroup(svg, x, y, kind, index = "") {
+  const g = svg.appendChild(createSvg("g"));
+  g.classList.add("shape");
+  g.dataset.kind = kind;
+  if (index !== "") g.dataset.index = String(index);
+  g.setAttribute("transform", `translate(${x},${y})`);
+
+  const rect = g.appendChild(createSvg("rect"));
+  rect.classList.add("node-rect");
+  rect.setAttribute("x", "-38");
+  rect.setAttribute("y", "-36");
+  rect.setAttribute("width", "76");
+  rect.setAttribute("height", "64");
+  return g;
+}
+
+function label(parent, text, y) {
+  const node = parent.appendChild(createSvg("text"));
+  node.textContent = text;
+  node.setAttribute("y", String(y));
+  node.setAttribute("text-anchor", "middle");
+}
+
+function line(parent, x1, y1, x2, y2, strokeWidth) {
+  const node = parent.appendChild(createSvg("line"));
+  node.setAttribute("x1", String(x1));
+  node.setAttribute("y1", String(y1));
+  node.setAttribute("x2", String(x2));
+  node.setAttribute("y2", String(y2));
+  node.setAttribute("stroke-width", strokeWidth);
+  return node;
+}
+
+function path(parent, d) {
+  const node = parent.appendChild(createSvg("path"));
+  node.setAttribute("d", d);
+  node.setAttribute("fill", "none");
+  return node;
+}
+
+function createSvg(tagName) {
+  return document.createElementNS("http://www.w3.org/2000/svg", tagName);
+}
+
+function markSelectedShape(diagram, rung) {
+  if (selectedNode?.rungId !== rung.id) return;
+
+  for (const shape of diagram.querySelectorAll("g.shape")) {
+    if (
+      (selectedNode.type === "contact" &&
+        shape.dataset.kind === "contact" &&
+        Number(shape.dataset.index) === selectedNode.index) ||
+      (selectedNode.type === "coil" && shape.dataset.kind === "coil")
+    ) {
+      shape.classList.add("selected");
+    }
+  }
+}
+
+function updateInspector() {
+  const context = ensureSelection();
+  const isContact = selectedNode?.type === "contact";
+  const isCoil = selectedNode?.type === "coil";
+  const isRung = selectedNode?.type === "rung";
+
+  els.contactOpSelect.disabled = !isContact;
+  els.pinSelect.disabled = !isContact;
+  els.coilSelect.disabled = !isCoil;
+  els.deleteNodeBtn.disabled =
+    !(isContact && context.rung.contacts.length > 1) && !(isRung && ladder.length > 1);
+  els.moveLeftBtn.disabled = !isContact || selectedNode.index <= 0;
+  els.moveRightBtn.disabled = !isContact || selectedNode.index >= context.rung.contacts.length - 1;
+
+  if (isContact) {
+    const contact = context.rung.contacts[selectedNode.index];
+    els.contactOpSelect.value = contact.op;
+    els.pinSelect.value = contact.pin;
+  }
+
+  if (isCoil) {
+    els.coilSelect.value = context.rung.coil;
+  }
 }
 
 function renderSensors(sensors) {
@@ -371,7 +994,13 @@ function renderLog() {
   for (const entry of lines) {
     const row = document.createElement("div");
     row.className = `log-line ${entry.type}`;
-    row.innerHTML = `<time>t+${String(entry.tick).padStart(4, "0")}</time><span>${entry.text}</span>`;
+
+    const time = row.appendChild(document.createElement("time"));
+    time.textContent = `t+${String(entry.tick).padStart(4, "0")}`;
+
+    const message = row.appendChild(document.createElement("span"));
+    message.textContent = entry.text;
+
     els.logWindow.appendChild(row);
   }
   scrollLogToBottom();
@@ -514,7 +1143,7 @@ function manhattan(a, b) {
 
 function driftValue() {
   const t = state.tick * 0.1;
-  return Math.abs((t + 0.2) - t - 0.2) * Math.max(1, state.tick ** 1.25);
+  return Math.abs(t + 0.2 - t - 0.2) * Math.max(1, state.tick ** 1.25);
 }
 
 function log(type, text) {
@@ -528,5 +1157,5 @@ function stopRun() {
     window.clearInterval(runTimer);
     runTimer = null;
   }
-  els.runBtn.textContent = "▶ 30";
+  els.runBtn.textContent = "30 tick";
 }

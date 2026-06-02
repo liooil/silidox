@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Silidox：修仙一定要灵根吗？MVP</title>
+    <title>Silidox: 硅基问道 MVP</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
@@ -11,7 +11,7 @@
       <header class="topbar">
         <div>
           <p class="eyebrow">Silidox boot shard // epoch 0x0001</p>
-          <h1>修仙一定要灵根吗？</h1>
+          <h1>硅基问道</h1>
         </div>
         <div class="system-readout" aria-live="polite">
           <span id="epochState">纪元稳定</span>
@@ -55,10 +55,11 @@
           </div>
 
           <div class="manual-block syntax">
-            <h3>残页语法</h3>
-            <pre>XIC I1 XIO I2 OTE Q2
-XIO I0 XIO I1 OTE Q0</pre>
-            <p>XIC 为常开触点，XIO 为常闭触点，OTE 给线圈上电。每行是一个 rung。</p>
+            <h3>梯形图语义</h3>
+            <pre>常开触点: 输入为 1 时导通
+常闭触点: 输入为 0 时导通
+线圈: 梯级导通时输出为 1</pre>
+            <p>第一阶段支持串联触点和单个输出线圈。每个梯级从左侧母线流向右侧线圈。</p>
           </div>
 
           <div class="objective">
@@ -67,22 +68,65 @@ XIO I0 XIO I1 OTE Q0</pre>
           </div>
         </section>
 
-        <section class="panel terminal-panel" aria-labelledby="terminalTitle">
+        <section class="panel terminal-panel lad-panel" aria-labelledby="terminalTitle">
           <div class="panel-header">
             <div>
-              <p class="panel-kicker">headless terminal</p>
+              <p class="panel-kicker">ladder workbench</p>
               <h2 id="terminalTitle">底层控制台</h2>
             </div>
             <div class="toolbar" aria-label="控制">
-              <button id="compileBtn" title="编译梯形图">⚙ 编译</button>
-              <button id="stepBtn" title="运行一个 tick">▶ 1</button>
-              <button id="runBtn" title="运行三十个 tick">▶ 30</button>
-              <button id="resetBtn" title="保留代码并重启当前纪元">↻ 轮回</button>
+              <button id="compileBtn" title="编译梯形图">编译</button>
+              <button id="stepBtn" title="运行一个 tick">1 tick</button>
+              <button id="runBtn" title="运行三十个 tick">30 tick</button>
+              <button id="resetBtn" title="保留梯形图并重启当前纪元">重启</button>
             </div>
           </div>
 
-          <label class="editor-label" for="programEditor">startup_sequence.lad</label>
-          <textarea id="programEditor" spellcheck="false"></textarea>
+          <div class="lad-editor" id="ladEditor">
+            <div class="lad-commandbar" aria-label="梯形图编辑">
+              <button class="tool-button" id="addRungBtn" data-label="添加梯级" data-tool="rung" draggable="true" title="添加梯级" aria-label="添加梯级">
+                <span aria-hidden="true">R+</span>
+              </button>
+              <button class="tool-button" id="addOpenContactBtn" data-label="常开触点" data-tool="contact-open" draggable="true" title="常开触点" aria-label="常开触点">
+                <span aria-hidden="true">-| |-</span>
+              </button>
+              <button class="tool-button" id="addClosedContactBtn" data-label="常闭触点" data-tool="contact-closed" draggable="true" title="常闭触点" aria-label="常闭触点">
+                <span aria-hidden="true">-|/|-</span>
+              </button>
+              <button class="tool-button" id="addCoilBtn" data-label="线圈" data-tool="coil" draggable="true" title="线圈" aria-label="线圈">
+                <span aria-hidden="true">-( )-</span>
+              </button>
+              <button class="tool-button" id="deleteNodeBtn" data-label="删除选中" data-tool="delete" title="删除选中" aria-label="删除选中">
+                <span aria-hidden="true">⌫</span>
+              </button>
+              <button class="tool-button" id="moveLeftBtn" data-label="左移触点" data-tool="move-left" title="左移触点" aria-label="左移触点">
+                <span aria-hidden="true">←</span>
+              </button>
+              <button class="tool-button" id="moveRightBtn" data-label="右移触点" data-tool="move-right" title="右移触点" aria-label="右移触点">
+                <span aria-hidden="true">→</span>
+              </button>
+            </div>
+
+            <div class="lad-inspector" id="nodeInspector" aria-label="节点属性">
+              <label>
+                <span>触点</span>
+                <select id="contactOpSelect">
+                  <option value="XIC">常开</option>
+                  <option value="XIO">常闭</option>
+                </select>
+              </label>
+              <label>
+                <span>输入</span>
+                <select id="pinSelect"></select>
+              </label>
+              <label>
+                <span>线圈</span>
+                <select id="coilSelect"></select>
+              </label>
+            </div>
+
+            <div class="rung-list" id="rungList" aria-label="梯级列表"></div>
+          </div>
 
           <div class="terminal-footer">
             <div class="sensor-bank" id="sensorBank" aria-label="传感器状态"></div>

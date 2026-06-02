@@ -135,6 +135,7 @@ export class LADNode extends LADShape {
     } else if (this.type === "rise") {
       icon.textContent = this.reverse ? "N" : "P";
     }
+    return g;
   }
   evaluateContact(vars, prevVars) {
     const val = !!vars[this.operand];
@@ -237,7 +238,6 @@ export class LADSeries extends LADShape {
       this.innerSize.right = lastChild.connectors.right;
     }
     this.size.right = x;
-    console.log(this.width);
   }
   /**
    * Adjusts the width of the series layout by the given delta.
