@@ -38,6 +38,16 @@ const DIRS = [
   { name: "W", dx: -1, dy: 0 },
 ];
 
+const LAD_DIMENSIONS = {
+  leftRail: 8,
+  rightRailInset: 8,
+  contactStartX: 58,
+  contactPitch: 92,
+  contactConnector: 10,
+  coilRightInset: 66,
+  coilConnector: 14,
+};
+
 const els = {
   compileBtn: document.querySelector("#compileBtn"),
   stepBtn: document.querySelector("#stepBtn"),
@@ -867,16 +877,47 @@ function renderLadDiagram(parent, rung, width) {
   svg.setAttribute("preserveAspectRatio", "xMinYMin meet");
 
   const y = 44;
-  line(svg, 8, 12, 8, 68, "2");
-  line(svg, width - 8, 12, width - 8, 68, "2");
-  line(svg, 8, y, width - 8, y, "1");
+  line(svg, LAD_DIMENSIONS.leftRail, 12, LAD_DIMENSIONS.leftRail, 68, "2");
+  line(svg, rightRailX(width), 12, rightRailX(width), 68, "2");
+  renderRungWires(svg, rung, width, y);
 
   for (let index = 0; index < rung.contacts.length; index += 1) {
-    renderContact(svg, 58 + index * 92, y, rung.contacts[index], index);
+    renderContact(svg, contactX(index), y, rung.contacts[index], index);
   }
-  renderCoil(svg, width - 66, y, rung.coil);
+  renderCoil(svg, coilX(width), y, rung.coil);
 
   return svg;
+}
+
+function renderRungWires(svg, rung, width, y) {
+  let cursor = LAD_DIMENSIONS.leftRail;
+
+  for (let index = 0; index < rung.contacts.length; index += 1) {
+    const x = contactX(index);
+    wire(svg, cursor, x - LAD_DIMENSIONS.contactConnector, y);
+    cursor = x + LAD_DIMENSIONS.contactConnector;
+  }
+
+  const outputX = coilX(width);
+  wire(svg, cursor, outputX - LAD_DIMENSIONS.coilConnector, y);
+  wire(svg, outputX + LAD_DIMENSIONS.coilConnector, rightRailX(width), y);
+}
+
+function contactX(index) {
+  return LAD_DIMENSIONS.contactStartX + index * LAD_DIMENSIONS.contactPitch;
+}
+
+function coilX(width) {
+  return width - LAD_DIMENSIONS.coilRightInset;
+}
+
+function rightRailX(width) {
+  return width - LAD_DIMENSIONS.rightRailInset;
+}
+
+function wire(svg, x1, x2, y) {
+  if (x2 <= x1) return null;
+  return line(svg, x1, y, x2, y, "1");
 }
 
 function renderContact(svg, x, y, contact, index) {
@@ -885,7 +926,7 @@ function renderContact(svg, x, y, contact, index) {
   path(g, "M-10,-10 L-10,10");
   path(g, "M10,-10 L10,10");
   if (contact.op === "XIO") {
-    path(g, "M-17,13 L17,-13").classList.add("node-mark");
+    path(g, "M-6,10 L6,-10").classList.add("node-mark");
   }
 }
 
