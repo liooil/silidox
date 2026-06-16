@@ -9,6 +9,6 @@
 - [x] Support dragging tools from the toolbar onto a rung.
 - [x] Fix LAD symbol drawing so wires do not pass through contacts or coils.
 - [x] Shorten the normally-closed contact slash to look like `|/|`.
-- [ ] Support dragging existing contacts to reorder or move them between rungs.
+- [x] Support dragging existing contacts to reorder or move them between rungs.
 - [ ] Add parallel branch editing and rendering.
-- [ ] Add a clearer variable/pin picker for inserted nodes.
+- [x] Add a clearer variable/pin picker for inserted nodes.

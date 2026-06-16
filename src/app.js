@@ -63,6 +63,7 @@ const els = {
   contactOpSelect: document.querySelector("#contactOpSelect"),
   pinSelect: document.querySelector("#pinSelect"),
   coilSelect: document.querySelector("#coilSelect"),
+  pinPicker: document.querySelector("#pinPicker"),
   rungList: document.querySelector("#rungList"),
   logWindow: document.querySelector("#logWindow"),
   sensorBank: document.querySelector("#sensorBank"),
@@ -88,6 +89,7 @@ let compiled = compileLadder(ladder);
 let runTimer = null;
 let logScrollFrame = null;
 let activeDraggedTool = "";
+let activeDraggedContact = null;
 
 populateInspectorOptions();
 renderSensorBank();
@@ -320,7 +322,7 @@ function wireEditorEvents() {
       });
 
       button.addEventListener("dragend", () => {
-        activeDraggedTool = "";
+        clearDragState();
       });
     }
   }
@@ -341,7 +343,7 @@ function wireEditorEvents() {
   els.rungList.addEventListener("drop", (event) => {
     const tool = draggedTool(event);
     els.rungList.classList.remove("drop-target");
-    activeDraggedTool = "";
+    clearDragState();
     if (!tool || event.target.closest(".rung-row")) return;
     event.preventDefault();
     applyTool(tool);
@@ -416,6 +418,38 @@ function isToolDrag(event) {
   );
 }
 
+function draggedContact(event) {
+  const raw =
+    event.dataTransfer?.getData("application/x-silidox-contact") ||
+    (activeDraggedContact ? JSON.stringify(activeDraggedContact) : "");
+  if (!raw) return null;
+
+  try {
+    const value = JSON.parse(raw);
+    if (typeof value.rungId === "string" && Number.isInteger(value.index)) {
+      return value;
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+function isContactDrag(event) {
+  return Boolean(
+    activeDraggedContact ||
+      Array.from(event.dataTransfer?.types || []).some(
+        (type) => type === "application/x-silidox-contact",
+      ),
+  );
+}
+
+function clearDragState() {
+  activeDraggedTool = "";
+  activeDraggedContact = null;
+}
+
 function addRungAfter(rungId = selectedNode?.rungId) {
   const rung = createRung();
   const index = ladder.findIndex((item) => item.id === rungId);
@@ -433,6 +467,29 @@ function insertContact(op, drop = null) {
   const index = Math.min(Math.max(0, insertAt), context.rung.contacts.length);
   context.rung.contacts.splice(index, 0, { op, pin: "I0" });
   selectedNode = { rungId: context.rung.id, type: "contact", index };
+  onLadderChanged();
+}
+
+function moveContact(source, drop) {
+  const from = ensureSelectionForRung(source.rungId);
+  const to = ensureSelectionForRung(drop?.rungId);
+  if (!from || !to) return;
+
+  const sourceIndex = source.index;
+  if (sourceIndex < 0 || sourceIndex >= from.rung.contacts.length) return;
+  if (from.rung.id !== to.rung.id && from.rung.contacts.length <= 1) return;
+
+  let insertAt = typeof drop?.insertAt === "number" ? drop.insertAt : to.rung.contacts.length;
+  insertAt = Math.min(Math.max(0, insertAt), to.rung.contacts.length);
+
+  const [contact] = from.rung.contacts.splice(sourceIndex, 1);
+  if (from.rung.id === to.rung.id && sourceIndex < insertAt) {
+    insertAt -= 1;
+  }
+  insertAt = Math.min(Math.max(0, insertAt), to.rung.contacts.length);
+  to.rung.contacts.splice(insertAt, 0, contact);
+
+  selectedNode = { rungId: to.rung.id, type: "contact", index: insertAt };
   onLadderChanged();
 }
 
@@ -809,6 +866,25 @@ function renderRungRow({ rung, index, width }, energized) {
   const svg = renderLadDiagram(diagram, rung, width);
 
   markSelectedShape(diagram, rung);
+  svg.addEventListener("dragstart", (event) => {
+    const shape = event.target.closest("g.shape");
+    if (!shape || shape.dataset.kind !== "contact") return;
+
+    const index = Number(shape.dataset.index);
+    activeDraggedContact = { rungId: rung.id, index };
+    event.dataTransfer.setData(
+      "application/x-silidox-contact",
+      JSON.stringify(activeDraggedContact),
+    );
+    event.dataTransfer.effectAllowed = "move";
+    shape.classList.add("dragging");
+    selectedNode = { rungId: rung.id, type: "contact", index };
+  });
+
+  svg.addEventListener("dragend", () => {
+    clearDragState();
+  });
+
   svg.addEventListener("click", (event) => {
     const shape = event.target.closest("g.shape");
     if (!shape) {
@@ -829,9 +905,9 @@ function renderRungRow({ rung, index, width }, energized) {
   });
 
   row.addEventListener("dragover", (event) => {
-    if (!isToolDrag(event)) return;
+    if (!isToolDrag(event) && !isContactDrag(event)) return;
     event.preventDefault();
-    event.dataTransfer.dropEffect = "copy";
+    event.dataTransfer.dropEffect = isContactDrag(event) ? "move" : "copy";
     row.classList.add("drop-target");
   });
 
@@ -843,13 +919,19 @@ function renderRungRow({ rung, index, width }, energized) {
 
   row.addEventListener("drop", (event) => {
     const tool = draggedTool(event);
+    const contactMove = draggedContact(event);
     row.classList.remove("drop-target");
-    activeDraggedTool = "";
-    if (!tool) return;
+    clearDragState();
+    if (!tool && !contactMove) return;
 
     event.preventDefault();
     event.stopPropagation();
-    applyTool(tool, dropContextFromEvent(event, rung));
+    const drop = dropContextFromEvent(event, rung);
+    if (contactMove) {
+      moveContact(contactMove, drop);
+    } else {
+      applyTool(tool, drop);
+    }
   });
 }
 
@@ -943,6 +1025,9 @@ function shapeGroup(svg, x, y, kind, index = "") {
   g.dataset.kind = kind;
   if (index !== "") g.dataset.index = String(index);
   g.setAttribute("transform", `translate(${x},${y})`);
+  if (kind === "contact") {
+    g.setAttribute("draggable", "true");
+  }
 
   const rect = g.appendChild(createSvg("rect"));
   rect.classList.add("node-rect");
@@ -1018,6 +1103,41 @@ function updateInspector() {
 
   if (isCoil) {
     els.coilSelect.value = context.rung.coil;
+  }
+
+  renderPinPicker(context, { isContact, isCoil });
+}
+
+function renderPinPicker(context, mode) {
+  els.pinPicker.innerHTML = "";
+
+  if (mode.isContact) {
+    const selectedPin = context.rung.contacts[selectedNode.index].pin;
+    renderPinButtons(PINS, selectedPin, (pin) => {
+      context.rung.contacts[selectedNode.index].pin = pin;
+      onLadderChanged();
+    });
+    return;
+  }
+
+  if (mode.isCoil) {
+    const entries = Object.entries(OUTPUTS);
+    renderPinButtons(entries, context.rung.coil, (pin) => {
+      context.rung.coil = pin;
+      onLadderChanged();
+    });
+  }
+}
+
+function renderPinButtons(entries, selected, onPick) {
+  for (const [pin, name] of entries) {
+    const button = els.pinPicker.appendChild(document.createElement("button"));
+    button.type = "button";
+    button.className = "pin-button";
+    button.classList.toggle("selected", pin === selected);
+    button.title = name;
+    button.textContent = pin;
+    button.addEventListener("click", () => onPick(pin));
   }
 }
 

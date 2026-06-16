@@ -357,6 +357,34 @@ h1 {
   box-shadow: 0 0 0 3px rgba(120, 242, 156, 0.12);
 }
 
+.pin-picker {
+  display: flex;
+  grid-column: 1 / -1;
+  gap: 6px;
+  min-height: 32px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-width: thin;
+}
+
+.pin-button {
+  flex: 0 0 auto;
+  min-width: 42px;
+  min-height: 30px;
+  border-radius: 4px;
+  padding: 0 9px;
+  color: var(--muted);
+  background: var(--panel-2);
+  font-size: 12px;
+}
+
+.pin-button:hover,
+.pin-button.selected {
+  border-color: var(--line-hot);
+  color: #06120a;
+  background: var(--green);
+}
+
 .rung-list {
   display: grid;
   align-content: start;
@@ -463,6 +491,16 @@ g.shape rect {
   fill: transparent;
   stroke: none;
   cursor: pointer;
+}
+
+g.shape[data-kind="contact"] rect {
+  cursor: grab;
+}
+
+g.shape[data-kind="contact"]:active rect,
+g.shape.dragging rect {
+  cursor: grabbing;
+  fill: rgba(255, 200, 87, 0.18);
 }
 
 g.shape:hover rect {
