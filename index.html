@@ -9,174 +9,194 @@
   <body>
     <div class="shell">
       <header class="topbar">
-        <div>
-          <p class="eyebrow">Silidox boot shard // epoch 0x0001</p>
-          <h1>硅基问道</h1>
+        <div class="brand-lockup">
+          <h1>SILIDOX</h1>
+          <span>硅基问道</span>
         </div>
-        <div class="system-readout" aria-live="polite">
-          <span id="epochState">纪元稳定</span>
-          <strong id="woodCount">木材 0 / 3</strong>
+
+        <div class="epoch-readout" aria-live="polite">
+          <strong id="epochState">S00 核心自检</strong>
+          <span id="epochLabel">EPOCH 0x0001</span>
         </div>
+
+        <dl class="telemetry" aria-label="运行状态">
+          <div><dt>tick</dt><dd id="tickReadout">0</dd></div>
+          <div><dt>core</dt><dd id="coreReadout">70</dd></div>
+          <div><dt>energy</dt><dd id="energyReadout">100</dd></div>
+          <div><dt>parts</dt><dd id="fiberReadout">0/3</dd></div>
+          <div class="cultivation-telemetry"><dt>qi</dt><dd id="auraReadout">0</dd></div>
+          <div class="cultivation-telemetry"><dt>root</dt><dd id="foundationReadout">0</dd></div>
+          <div class="cultivation-telemetry"><dt>realm</dt><dd id="realmReadout">未入道</dd></div>
+        </dl>
       </header>
 
+      <section class="directive-bar" aria-labelledby="directiveLabel">
+        <span id="directiveLabel">ACTIVE DIRECTIVE</span>
+        <p id="objectiveText">先活下来：观察核心低压输入，并用梯形图维持 Q4 核心脉冲。</p>
+      </section>
+
       <main class="workspace">
-        <section class="panel manual-panel" aria-labelledby="manualTitle">
-          <div class="panel-header">
-            <div>
-              <p class="panel-kicker">破损文档</p>
-              <h2 id="manualTitle">通用机器操作手册</h2>
-            </div>
-            <span class="chip">Ladder-0</span>
-          </div>
-
-          <div class="manual-block">
-            <h3>输入引脚</h3>
-            <dl class="pin-list">
-              <div><dt>I0</dt><dd>FRONT_BLOCKED</dd></div>
-              <div><dt>I1</dt><dd>FRONT_TREE</dd></div>
-              <div><dt>I2</dt><dd>CARGO_FULL</dd></div>
-              <div><dt>I3</dt><dd>AT_HOME</dd></div>
-              <div><dt>I4</dt><dd>HOME_VECTOR_AHEAD</dd></div>
-              <div><dt>I5</dt><dd>LAST_COLLISION</dd></div>
-              <div><dt>I6</dt><dd>HEAVEN_JITTER</dd></div>
-              <div><dt>I7</dt><dd>FRONT_EMPTY</dd></div>
-            </dl>
-          </div>
-
-          <div class="manual-block">
-            <h3>输出线圈</h3>
-            <dl class="pin-list">
-              <div><dt>Q0</dt><dd>MOVE</dd></div>
-              <div><dt>Q1</dt><dd>TURN_RIGHT</dd></div>
-              <div><dt>Q2</dt><dd>CHOP</dd></div>
-              <div><dt>Q3</dt><dd>DEPOSIT</dd></div>
-              <div><dt>Q4</dt><dd>WAIT</dd></div>
-            </dl>
-          </div>
-
-          <div class="manual-block syntax">
-            <h3>梯形图语义</h3>
-            <pre>常开触点: 输入为 1 时导通
-常闭触点: 输入为 0 时导通
-线圈: 梯级导通时输出为 1</pre>
-            <p>第一阶段支持串联触点和单个输出线圈。每个梯级从左侧母线流向右侧线圈。</p>
-          </div>
-
-          <div class="objective">
-            <span>当前执念</span>
-            <p id="objectiveText">盲态伐木，回收 3 份木材，拼出第一只光电传感器。</p>
-          </div>
-        </section>
-
-        <section class="panel terminal-panel lad-panel" aria-labelledby="terminalTitle">
-          <div class="panel-header">
-            <div>
-              <p class="panel-kicker">ladder workbench</p>
-              <h2 id="terminalTitle">底层控制台</h2>
-            </div>
-            <div class="toolbar" aria-label="控制">
-              <button id="compileBtn" title="编译梯形图">编译</button>
-              <button id="stepBtn" title="运行一个 tick">1 tick</button>
-              <button id="runBtn" title="运行三十个 tick">30 tick</button>
+        <section class="panel terminal-panel" aria-labelledby="terminalTitle">
+          <div class="panel-header terminal-header">
+            <h2 id="terminalTitle">梯形逻辑</h2>
+            <div class="toolbar" aria-label="运行控制">
+              <button id="stepBtn" title="运行一个扫描周期">单步</button>
+              <button class="primary-button" id="runBtn" title="运行三十个扫描周期">运行 ×30</button>
               <button id="resetBtn" title="保留梯形图并重启当前纪元">重启</button>
+              <button class="danger-button" id="newGameBtn" title="清除轮回记录和梯形图">归零</button>
             </div>
           </div>
 
           <div class="lad-editor" id="ladEditor">
-            <div class="lad-commandbar" aria-label="梯形图编辑">
-              <button class="tool-button" id="addRungBtn" data-label="添加梯级" data-tool="rung" draggable="true" title="添加梯级" aria-label="添加梯级">
-                <span aria-hidden="true">R+</span>
-              </button>
-              <button class="tool-button" id="addOpenContactBtn" data-label="常开触点" data-tool="contact-open" draggable="true" title="常开触点" aria-label="常开触点">
-                <span aria-hidden="true">-| |-</span>
-              </button>
-              <button class="tool-button" id="addClosedContactBtn" data-label="常闭触点" data-tool="contact-closed" draggable="true" title="常闭触点" aria-label="常闭触点">
-                <span aria-hidden="true">-|/|-</span>
-              </button>
-              <button class="tool-button" id="addCoilBtn" data-label="线圈" data-tool="coil" draggable="true" title="线圈" aria-label="线圈">
-                <span aria-hidden="true">-( )-</span>
-              </button>
-              <button class="tool-button" id="deleteNodeBtn" data-label="删除选中" data-tool="delete" title="删除选中" aria-label="删除选中">
-                <span aria-hidden="true">⌫</span>
-              </button>
-              <button class="tool-button" id="moveLeftBtn" data-label="左移触点" data-tool="move-left" title="左移触点" aria-label="左移触点">
-                <span aria-hidden="true">←</span>
-              </button>
-              <button class="tool-button" id="moveRightBtn" data-label="右移触点" data-tool="move-right" title="右移触点" aria-label="右移触点">
-                <span aria-hidden="true">→</span>
-              </button>
-            </div>
+            <div class="editor-bar">
+              <div class="lad-commandbar" aria-label="梯形图编辑">
+                <button class="tool-button" id="addRungBtn" data-label="添加梯级" data-tool="rung" draggable="true" title="添加梯级" aria-label="添加梯级">
+                  <span aria-hidden="true">R+</span>
+                </button>
+                <button class="tool-button" id="addOpenContactBtn" data-label="添加常开触点" data-tool="contact-open" draggable="true" title="添加常开触点" aria-label="添加常开触点">
+                  <span aria-hidden="true">-| |-</span>
+                </button>
+                <button class="tool-button" id="addClosedContactBtn" data-label="添加常闭触点" data-tool="contact-closed" draggable="true" title="添加常闭触点" aria-label="添加常闭触点">
+                  <span aria-hidden="true">-|/|-</span>
+                </button>
+                <button class="tool-button" id="deleteNodeBtn" data-label="删除选中" data-tool="delete" title="删除选中" aria-label="删除选中">
+                  <span aria-hidden="true">⌫</span>
+                </button>
+                <button class="tool-button" id="moveLeftBtn" data-label="左移触点" data-tool="move-left" title="左移触点" aria-label="左移触点">
+                  <span aria-hidden="true">←</span>
+                </button>
+                <button class="tool-button" id="moveRightBtn" data-label="右移触点" data-tool="move-right" title="右移触点" aria-label="右移触点">
+                  <span aria-hidden="true">→</span>
+                </button>
+              </div>
 
-            <div class="lad-inspector" id="nodeInspector" aria-label="节点属性">
-              <label>
-                <span>触点</span>
-                <select id="contactOpSelect">
-                  <option value="XIC">常开</option>
-                  <option value="XIO">常闭</option>
-                </select>
-              </label>
-              <label>
-                <span>输入</span>
-                <select id="pinSelect"></select>
-              </label>
-              <label>
-                <span>线圈</span>
-                <select id="coilSelect"></select>
-              </label>
-              <div class="pin-picker" id="pinPicker" aria-label="引脚选择"></div>
+              <div class="lad-inspector" id="nodeInspector" aria-label="节点属性">
+                <label>
+                  <span>触点</span>
+                  <select id="contactOpSelect">
+                    <option value="XIC">常开</option>
+                    <option value="XIO">常闭</option>
+                  </select>
+                </label>
+                <label>
+                  <span>输入</span>
+                  <select id="pinSelect"></select>
+                </label>
+                <label>
+                  <span>线圈</span>
+                  <select id="coilSelect"></select>
+                </label>
+              </div>
             </div>
 
             <div class="rung-list" id="rungList" aria-label="梯级列表"></div>
           </div>
 
-          <div class="terminal-footer">
-            <div class="sensor-bank" id="sensorBank" aria-label="传感器状态"></div>
+          <section class="io-rack" aria-labelledby="ioTitle">
+            <div class="band-header">
+              <h3 id="ioTitle">LIVE I/O</h3>
+              <span class="scan-readout" id="ioScanReadout">PRE-SCAN</span>
+            </div>
+            <div class="io-groups">
+              <div class="io-group">
+                <h4>INPUT</h4>
+                <div class="sensor-bank" id="sensorBank" aria-label="输入总线"></div>
+              </div>
+              <div class="io-group output-group">
+                <h4>OUTPUT</h4>
+                <div class="output-bank" id="outputBank" aria-label="输出总线"></div>
+              </div>
+            </div>
+          </section>
+
+          <section class="log-console" aria-labelledby="logTitle">
+            <div class="band-header">
+              <h3 id="logTitle">EVENT LOG</h3>
+            </div>
             <div class="log-window" id="logWindow" aria-live="polite"></div>
-          </div>
+          </section>
         </section>
 
-        <section class="panel perception-panel" aria-labelledby="perceptionTitle">
-          <div class="panel-header">
-            <div>
-              <p class="panel-kicker">perception bus</p>
+        <aside class="side-stack">
+          <section class="panel perception-panel" aria-labelledby="perceptionTitle">
+            <div class="panel-header">
               <h2 id="perceptionTitle">物理世界</h2>
+              <span class="chip" id="cameraChip">NO SENSOR</span>
             </div>
-            <span class="chip" id="cameraChip">NO SENSOR</span>
-          </div>
 
-          <div class="monitor-wrap">
-            <canvas id="worldCanvas" width="440" height="320" aria-label="低像素监控窗口"></canvas>
-            <div class="blind-overlay" id="blindOverlay">
-              <strong>HEADLESS</strong>
-              <span>Collision / Pin / Log only</span>
+            <div class="monitor-wrap">
+              <canvas id="worldCanvas" width="440" height="320" aria-label="低像素监控窗口"></canvas>
+              <div class="blind-overlay" id="blindOverlay">
+                <strong>HEADLESS</strong>
+                <span>OPTICAL BUS OFFLINE</span>
+              </div>
             </div>
-          </div>
+          </section>
 
-          <div class="metrics">
-            <div>
-              <span>tick</span>
-              <strong id="tickReadout">0</strong>
+          <section class="panel cultivation-panel" aria-labelledby="cultivationTitle">
+            <div class="panel-header">
+              <h2 id="cultivationTitle">修行炉</h2>
+              <span class="chip" id="realmChip">未入道</span>
             </div>
-            <div>
-              <span>energy</span>
-              <strong id="energyReadout">100</strong>
-            </div>
-            <div>
-              <span>float drift</span>
-              <strong id="driftReadout">0e+0</strong>
-            </div>
-          </div>
 
-          <div class="legend">
-            <span><i class="swatch bot"></i>Silidox</span>
-            <span><i class="swatch home"></i>Home</span>
-            <span><i class="swatch tree"></i>Wood</span>
-            <span><i class="swatch rock"></i>Stone</span>
-          </div>
-        </section>
+            <dl class="cultivation-grid" aria-label="修行状态">
+              <div><dt>灵气</dt><dd id="cultQi">0</dd></div>
+              <div><dt>根基</dt><dd id="cultFoundation">0</dd></div>
+              <div><dt>阴·取灵</dt><dd id="cultYin">0/扫</dd></div>
+              <div><dt>阳·生灵</dt><dd id="cultYang">0/扫</dd></div>
+              <div><dt>天道注视</dt><dd id="cultAttention">0%</dd></div>
+              <div><dt>下境</dt><dd id="cultNext">练气一层</dd></div>
+            </dl>
+
+            <div class="cultivation-actions" aria-label="修行操作">
+              <button class="primary-button" id="drawQiBtn">取灵</button>
+              <button id="breathUpgradeBtn">吐纳</button>
+              <button id="foundationBtn">固本</button>
+              <button id="spiritArrayBtn">生灵阵</button>
+              <button id="breakthroughBtn">突破</button>
+            </div>
+
+            <p class="cultivation-hint" id="cultivationHint">残缺机体正在以原始信号校准第一缕灵气。</p>
+          </section>
+
+          <section class="panel ledger-panel" id="ledgerPanel" aria-labelledby="ledgerTitle" hidden>
+            <div class="ledger-heading">
+              <h2 id="ledgerTitle">天道账本</h2>
+              <div class="attention-readout">
+                <span>ATTENTION</span>
+                <strong id="heavenAttention">0%</strong>
+              </div>
+            </div>
+
+            <dl class="ledger-grid">
+              <div><dt>sample</dt><dd id="ledgerSample">EMPTY</dd></div>
+              <div><dt>ack</dt><dd id="ledgerAck">0</dd></div>
+              <div><dt>phase</dt><dd id="ledgerPhase">OFFLINE</dd></div>
+            </dl>
+
+            <div class="protocol-trace" aria-label="结算扫描顺序">
+              <span>01 SAMPLE</span>
+              <i aria-hidden="true">›</i>
+              <span>02 LOGIC</span>
+              <i aria-hidden="true">›</i>
+              <span>03 CREDIT</span>
+              <i aria-hidden="true">›</i>
+              <span>04 LATCH</span>
+            </div>
+            <p class="protocol-note">ACK precedes physical consumption by two scans.</p>
+          </section>
+        </aside>
       </main>
     </div>
 
+    <div class="epoch-overlay" id="epochOverlay" aria-live="assertive" aria-hidden="true">
+      <span>HEAVEN PATCH COMMITTED</span>
+      <strong>I/O SIGNATURE REWRITTEN</strong>
+      <small>module archive retained</small>
+    </div>
+
+    <script src="./src/data.js"></script>
+    <script src="./src/ladder-editor.js"></script>
     <script src="./src/app.js"></script>
   </body>
 </html>

@@ -1,537 +1,306 @@
-const PINS = [
-  ["I0", "FRONT_BLOCKED"],
-  ["I1", "FRONT_TREE"],
-  ["I2", "CARGO_FULL"],
-  ["I3", "AT_HOME"],
-  ["I4", "HOME_VECTOR_AHEAD"],
-  ["I5", "LAST_COLLISION"],
-  ["I6", "HEAVEN_JITTER"],
-  ["I7", "FRONT_EMPTY"],
-];
-
-const OUTPUTS = {
-  Q0: "MOVE",
-  Q1: "TURN_RIGHT",
-  Q2: "CHOP",
-  Q3: "DEPOSIT",
-  Q4: "WAIT",
-};
-
-const ACTION_PRIORITY = ["Q3", "Q2", "Q1", "Q0", "Q4"];
-const LADDER_STORAGE_KEY = "silidox.ladder.v1";
-const LEGACY_PROGRAM_KEY = "silidox.program";
-
-const WORLD_TEMPLATE = [
-  "###########",
-  "#..T..#...#",
-  "##........#",
-  "#H....T.TT#",
-  "##........#",
-  "#..#..T...#",
-  "###########",
-];
-
-const DIRS = [
-  { name: "N", dx: 0, dy: -1 },
-  { name: "E", dx: 1, dy: 0 },
-  { name: "S", dx: 0, dy: 1 },
-  { name: "W", dx: -1, dy: 0 },
-];
-
-const LAD_DIMENSIONS = {
-  leftRail: 8,
-  rightRailInset: 8,
-  contactStartX: 58,
-  contactPitch: 92,
-  contactConnector: 10,
-  coilRightInset: 66,
-  coilConnector: 14,
-};
-
+// Main game loop, world simulation, and screen rendering.
 const els = {
-  compileBtn: document.querySelector("#compileBtn"),
   stepBtn: document.querySelector("#stepBtn"),
   runBtn: document.querySelector("#runBtn"),
   resetBtn: document.querySelector("#resetBtn"),
+  newGameBtn: document.querySelector("#newGameBtn"),
   addRungBtn: document.querySelector("#addRungBtn"),
   addOpenContactBtn: document.querySelector("#addOpenContactBtn"),
   addClosedContactBtn: document.querySelector("#addClosedContactBtn"),
-  addCoilBtn: document.querySelector("#addCoilBtn"),
   deleteNodeBtn: document.querySelector("#deleteNodeBtn"),
   moveLeftBtn: document.querySelector("#moveLeftBtn"),
   moveRightBtn: document.querySelector("#moveRightBtn"),
   contactOpSelect: document.querySelector("#contactOpSelect"),
   pinSelect: document.querySelector("#pinSelect"),
   coilSelect: document.querySelector("#coilSelect"),
-  pinPicker: document.querySelector("#pinPicker"),
   rungList: document.querySelector("#rungList"),
   logWindow: document.querySelector("#logWindow"),
   sensorBank: document.querySelector("#sensorBank"),
+  outputBank: document.querySelector("#outputBank"),
+  ioScanReadout: document.querySelector("#ioScanReadout"),
   worldCanvas: document.querySelector("#worldCanvas"),
   blindOverlay: document.querySelector("#blindOverlay"),
   cameraChip: document.querySelector("#cameraChip"),
   tickReadout: document.querySelector("#tickReadout"),
   energyReadout: document.querySelector("#energyReadout"),
-  driftReadout: document.querySelector("#driftReadout"),
-  woodCount: document.querySelector("#woodCount"),
+  coreReadout: document.querySelector("#coreReadout"),
+  fiberReadout: document.querySelector("#fiberReadout"),
+  auraReadout: document.querySelector("#auraReadout"),
+  foundationReadout: document.querySelector("#foundationReadout"),
+  realmReadout: document.querySelector("#realmReadout"),
   epochState: document.querySelector("#epochState"),
+  epochLabel: document.querySelector("#epochLabel"),
   objectiveText: document.querySelector("#objectiveText"),
+  ledgerPanel: document.querySelector("#ledgerPanel"),
+  ledgerSample: document.querySelector("#ledgerSample"),
+  ledgerAck: document.querySelector("#ledgerAck"),
+  ledgerPhase: document.querySelector("#ledgerPhase"),
+  heavenAttention: document.querySelector("#heavenAttention"),
+  epochOverlay: document.querySelector("#epochOverlay"),
+  realmChip: document.querySelector("#realmChip"),
+  cultQi: document.querySelector("#cultQi"),
+  cultFoundation: document.querySelector("#cultFoundation"),
+  cultYin: document.querySelector("#cultYin"),
+  cultYang: document.querySelector("#cultYang"),
+  cultAttention: document.querySelector("#cultAttention"),
+  cultNext: document.querySelector("#cultNext"),
+  cultivationHint: document.querySelector("#cultivationHint"),
+  drawQiBtn: document.querySelector("#drawQiBtn"),
+  breathUpgradeBtn: document.querySelector("#breathUpgradeBtn"),
+  foundationBtn: document.querySelector("#foundationBtn"),
+  spiritArrayBtn: document.querySelector("#spiritArrayBtn"),
+  breakthroughBtn: document.querySelector("#breakthroughBtn"),
 };
 
 const ctx = els.worldCanvas.getContext("2d");
+const meta = loadMeta();
 
-let nextRungId = 1;
-let state = createInitialState();
-let ladder = loadLadder();
-syncNextRungId(ladder);
-let selectedNode = firstSelectable(ladder);
-let compiled = compileLadder(ladder);
+let state = createInitialState(meta.epoch);
 let runTimer = null;
 let logScrollFrame = null;
-let activeDraggedTool = "";
-let activeDraggedContact = null;
+let overlayTimer = null;
 
-populateInspectorOptions();
+initLadderEditor();
 renderSensorBank();
-wireEditorEvents();
 wireRunEvents();
 
 compileAndReport();
 render();
 
-function createInitialState() {
-  const grid = WORLD_TEMPLATE.map((row) => row.split(""));
-  let home = { x: 1, y: 3 };
+function loadMeta() {
+  const fallback = {
+    epoch: 0,
+    patchLevel: 0,
+    complete: false,
+    discoveries: {},
+    cultivation: createDefaultCultivation(),
+  };
+  const stored = localStorage.getItem(META_STORAGE_KEY);
+  if (!stored) return fallback;
 
-  for (let y = 0; y < grid.length; y += 1) {
-    for (let x = 0; x < grid[y].length; x += 1) {
-      if (grid[y][x] === "H") home = { x, y };
-    }
+  try {
+    const value = JSON.parse(stored);
+    return {
+      epoch: Number.isInteger(value.epoch) ? Math.max(0, value.epoch) : 0,
+      patchLevel: Number.isInteger(value.patchLevel) ? Math.max(0, value.patchLevel) : 0,
+      complete: Boolean(value.complete),
+      discoveries: normalizeDiscoveries(value.discoveries),
+      cultivation: normalizeCultivation(value.cultivation),
+    };
+  } catch {
+    localStorage.removeItem(META_STORAGE_KEY);
+    return fallback;
   }
+}
 
+function createDefaultCultivation() {
   return {
-    grid,
-    home,
-    robot: { x: home.x, y: home.y, dir: 1, cargo: 0 },
-    tick: 0,
-    energy: 100,
-    wood: 0,
-    lastCollision: false,
-    cameraUnlocked: false,
-    halted: false,
-    logs: [
-      { type: "good", tick: 0, text: "boot: no spiritual root detected" },
-      { type: "warn", tick: 0, text: "manual pages missing; ladder runtime online" },
-      { type: "info", tick: 0, text: "objective: recover 3 wood before float drift breaks epoch" },
-    ],
+    qi: 0,
+    lifetimeQi: 0,
+    foundation: 0,
+    realm: 0,
+    yinLevel: 0,
+    yangLevel: 0,
+    attention: 0,
+    manualDraws: 0,
+    breakthroughs: 0,
   };
 }
 
-function createDefaultLadder() {
-  return [
-    createRung(
-      [
-        { op: "XIC", pin: "I2" },
-        { op: "XIC", pin: "I3" },
-      ],
-      "Q3",
-    ),
-    createRung(
-      [
-        { op: "XIC", pin: "I1" },
-        { op: "XIO", pin: "I2" },
-      ],
-      "Q2",
-    ),
-    createRung(
-      [
-        { op: "XIC", pin: "I2" },
-        { op: "XIO", pin: "I3" },
-        { op: "XIC", pin: "I4" },
-      ],
-      "Q0",
-    ),
-    createRung(
-      [
-        { op: "XIC", pin: "I2" },
-        { op: "XIO", pin: "I4" },
-      ],
-      "Q1",
-    ),
-    createRung(
-      [
-        { op: "XIO", pin: "I0" },
-        { op: "XIO", pin: "I1" },
-        { op: "XIO", pin: "I2" },
-      ],
-      "Q0",
-    ),
-    createRung(
-      [
-        { op: "XIC", pin: "I0" },
-        { op: "XIO", pin: "I2" },
-      ],
-      "Q1",
-    ),
-  ];
-}
+function normalizeCultivation(value) {
+  const fallback = createDefaultCultivation();
+  if (!value || typeof value !== "object" || Array.isArray(value)) return fallback;
 
-function createRung(contacts = [{ op: "XIC", pin: "I0" }], coil = "Q4", id = allocateRungId()) {
   return {
-    id,
-    contacts: contacts.map((contact) => ({
-      op: contact.op === "XIO" ? "XIO" : "XIC",
-      pin: isKnownPin(contact.pin) ? contact.pin : "I0",
-    })),
-    coil: OUTPUTS[coil] ? coil : "Q4",
+    qi: normalizeNumber(value.qi, 0, 999999),
+    lifetimeQi: normalizeNumber(value.lifetimeQi, 0, 999999),
+    foundation: Math.floor(normalizeNumber(value.foundation, 0, 9999)),
+    realm: Math.min(
+      REALMS.length - 1,
+      Math.floor(normalizeNumber(value.realm, 0, REALMS.length - 1)),
+    ),
+    yinLevel: Math.floor(normalizeNumber(value.yinLevel, 0, 999)),
+    yangLevel: Math.floor(normalizeNumber(value.yangLevel, 0, 999)),
+    attention: normalizeNumber(value.attention, 0, 100),
+    manualDraws: Math.floor(normalizeNumber(value.manualDraws, 0, 999999)),
+    breakthroughs: Math.floor(normalizeNumber(value.breakthroughs, 0, 999999)),
   };
 }
 
-function allocateRungId() {
-  const id = `rung-${nextRungId}`;
-  nextRungId += 1;
-  return id;
+function normalizeNumber(value, min, max) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return min;
+  return Math.min(max, Math.max(min, number));
 }
 
-function syncNextRungId(program) {
-  const highest = program.reduce((max, rung) => {
-    const match = /^rung-(\d+)$/.exec(rung.id || "");
-    return match ? Math.max(max, Number(match[1])) : max;
-  }, 0);
-  nextRungId = Math.max(nextRungId, highest + 1);
+function cloneCultivation(cultivation) {
+  return { ...cultivation };
 }
 
-function loadLadder() {
-  const stored = localStorage.getItem(LADDER_STORAGE_KEY);
-  if (stored) {
-    try {
-      return normalizeLadder(JSON.parse(stored));
-    } catch {
-      localStorage.removeItem(LADDER_STORAGE_KEY);
+function normalizeDiscoveries(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+
+  const normalized = {};
+  for (const [epoch, pins] of Object.entries(value)) {
+    if (!/^\d+$/.test(epoch) || !pins || typeof pins !== "object" || Array.isArray(pins)) {
+      continue;
     }
-  }
 
-  const legacy = localStorage.getItem(LEGACY_PROGRAM_KEY);
-  if (legacy) {
-    const parsed = parseLegacyProgram(legacy);
-    if (parsed.length > 0) return normalizeLadder(parsed);
-  }
-
-  return createDefaultLadder();
-}
-
-function normalizeLadder(value) {
-  if (!Array.isArray(value)) return createDefaultLadder();
-  const normalized = value
-    .map((rung) => createRung(rung.contacts, rung.coil, rung.id || allocateRungId()))
-    .filter((rung) => rung.contacts.length > 0);
-  return normalized.length > 0 ? normalized : createDefaultLadder();
-}
-
-function parseLegacyProgram(source) {
-  const rungs = [];
-  for (const raw of source.split(/\r?\n/)) {
-    const cleaned = raw.replace(/[;#].*$/, "").trim();
-    if (!cleaned) continue;
-
-    const tokens = cleaned.toUpperCase().split(/\s+/);
-    if (tokens.length < 3 || tokens[tokens.length - 2] !== "OTE") continue;
-
-    const coil = tokens[tokens.length - 1];
-    if (!OUTPUTS[coil]) continue;
-
-    const contactTokens = tokens.slice(0, -2);
-    if (contactTokens.length % 2 !== 0) continue;
-
-    const contacts = [];
-    for (let i = 0; i < contactTokens.length; i += 2) {
-      const op = contactTokens[i];
-      const pin = contactTokens[i + 1];
-      if ((op === "XIC" || op === "XIO") && isKnownPin(pin)) {
-        contacts.push({ op, pin });
+    const knownPins = {};
+    for (const pin of PIN_IDS) {
+      const level = Number(pins[pin]);
+      if (level === DISCOVERY.SUSPECTED || level === DISCOVERY.CONFIRMED) {
+        knownPins[pin] = level;
       }
     }
-
-    if (contacts.length > 0) rungs.push(createRung(contacts, coil));
+    if (Object.keys(knownPins).length > 0) normalized[epoch] = knownPins;
   }
-  return rungs;
+  return normalized;
 }
 
-function saveLadder() {
-  localStorage.setItem(LADDER_STORAGE_KEY, JSON.stringify(ladder));
+function saveMeta() {
+  localStorage.setItem(META_STORAGE_KEY, JSON.stringify(meta));
 }
 
-function firstSelectable(program) {
-  const rung = program[0];
-  if (!rung) return null;
-  return { rungId: rung.id, type: "contact", index: 0 };
+function discoveryLevel(pin) {
+  return meta.discoveries[String(state.epoch)]?.[pin] ?? DISCOVERY.UNKNOWN;
 }
 
-function populateInspectorOptions() {
-  for (const [pin, name] of PINS) {
-    const option = document.createElement("option");
-    option.value = pin;
-    option.textContent = `${pin} ${name}`;
-    els.pinSelect.appendChild(option);
-  }
+function inputSignalLabel(pin) {
+  const signal = state.pinMap[pin];
+  const info = SIGNAL_INFO[signal];
+  const level = discoveryLevel(pin);
+  if (level === DISCOVERY.CONFIRMED) return `${signal} · ${info.zh}`;
+  if (level === DISCOVERY.SUSPECTED) return `${signal}? · ${info.hypothesis}?`;
+  return "未识别信号";
+}
 
-  for (const [pin, name] of Object.entries(OUTPUTS)) {
-    const option = document.createElement("option");
-    option.value = pin;
-    option.textContent = `${pin} ${name}`;
-    els.coilSelect.appendChild(option);
+function outputSignalLabel(pin) {
+  return `${OUTPUTS[pin]} · ${OUTPUT_INFO[pin].zh}`;
+}
+
+function pinForSignal(signal) {
+  return PIN_IDS.find((pin) => state.pinMap[pin] === signal) ?? null;
+}
+
+function discoverSignal(signal, level) {
+  const pin = pinForSignal(signal);
+  if (!pin || level <= discoveryLevel(pin)) return;
+
+  const epoch = String(state.epoch);
+  if (!meta.discoveries[epoch]) meta.discoveries[epoch] = {};
+  meta.discoveries[epoch][pin] = level;
+  saveMeta();
+
+  const info = SIGNAL_INFO[signal];
+  if (level === DISCOVERY.CONFIRMED) {
+    log("good", `信号确认：${pin} ${signal} / ${info.zh}`);
+  } else {
+    log("warn", `信号假设：${pin} ${signal}? / ${info.hypothesis}?`);
   }
+}
+
+function recordSignalEvidence(signal) {
+  state.signalEvidence[signal] = (state.signalEvidence[signal] ?? 0) + 1;
+  const level =
+    state.signalEvidence[signal] >= 2 ? DISCOVERY.CONFIRMED : DISCOVERY.SUSPECTED;
+  discoverSignal(signal, level);
+}
+
+function observeSignals(sensors) {
+  for (const pin of PIN_IDS) {
+    if (!sensors[pin]) continue;
+    const signal = state.pinMap[pin];
+    if (state.signalEvidence[signal] && discoveryLevel(pin) < DISCOVERY.CONFIRMED) {
+      recordSignalEvidence(signal);
+    } else {
+      discoverSignal(signal, DISCOVERY.SUSPECTED);
+    }
+  }
+}
+
+function createInitialState(epoch) {
+  const isPatchedEpoch = epoch > 0;
+  return {
+    epoch,
+    stage: isPatchedEpoch ? "remap" : "boot",
+    eventSerial: 0,
+    track: {
+      length: TRACK_LENGTH,
+      start: TRACK_START,
+      fragments: [...TRACK_FRAGMENTS],
+    },
+    pinMap: PIN_MAPS[Math.min(epoch, PIN_MAPS.length - 1)],
+    robot: { x: TRACK_START, y: 0, dir: 1 },
+    contact: { stall: false, fiber: false },
+    pickupPulse: false,
+    tick: 0,
+    lastScan: null,
+    signalEvidence: {},
+    energy: 100,
+    core: 70,
+    corePulses: 0,
+    parts: 0,
+    aura: 0,
+    cultivation: cloneCultivation(meta.cultivation),
+    cameraUnlocked: false,
+    halted: false,
+    heavenAttention: 0,
+    calamityCountdown: null,
+    ledger: {
+      offering: false,
+      ack: false,
+      creditsForOffering: 0,
+      consumeAt: null,
+      respawnAt: null,
+      windowOrigin: 0,
+      duplicateDetected: false,
+    },
+    logs: isPatchedEpoch
+      ? [
+          { type: "bad", tick: 0, text: "heaven patch applied: I/O signature rewritten" },
+          { type: "good", tick: 0, text: "module archive restored from previous epoch" },
+          { type: "warn", tick: 0, text: "core loop incompatible; inspect remapped channels" },
+        ]
+      : [
+          { type: "good", tick: 0, text: "boot: no spiritual root detected" },
+          { type: "warn", tick: 0, text: "semantic drivers missing; raw I/O only" },
+          { type: "info", tick: 0, text: "restore core pulse before actuator interlock expires" },
+        ],
+  };
 }
 
 function renderSensorBank() {
-  for (const [pin, name] of PINS) {
-    const node = document.createElement("div");
-    node.className = "sensor";
-    node.dataset.pin = pin;
+  els.sensorBank.innerHTML = "";
+  for (const pin of PIN_IDS) {
+    createBusNode(els.sensorBank, pin, inputSignalLabel(pin));
+  }
 
-    const label = node.appendChild(document.createElement("span"));
-    label.textContent = `${pin} ${name}`;
-
-    const value = node.appendChild(document.createElement("strong"));
-    value.textContent = "0";
-
-    els.sensorBank.appendChild(node);
+  els.outputBank.innerHTML = "";
+  for (const pin of Object.keys(OUTPUTS)) {
+    createBusNode(els.outputBank, pin, outputSignalLabel(pin)).classList.add("identified");
   }
 }
 
-function wireEditorEvents() {
-  const toolButtons = [
-    [els.addRungBtn, "rung"],
-    [els.addOpenContactBtn, "contact-open"],
-    [els.addClosedContactBtn, "contact-closed"],
-    [els.addCoilBtn, "coil"],
-    [els.deleteNodeBtn, "delete"],
-    [els.moveLeftBtn, "move-left"],
-    [els.moveRightBtn, "move-right"],
-  ];
+function createBusNode(container, pin, name) {
+  const node = container.appendChild(document.createElement("div"));
+  node.className = "sensor";
+  node.dataset.pin = pin;
 
-  for (const [button, tool] of toolButtons) {
-    button.dataset.tool = button.dataset.tool || tool;
-    button.addEventListener("click", () => applyTool(button.dataset.tool));
+  const key = node.appendChild(document.createElement("span"));
+  key.className = "bus-pin";
+  key.textContent = pin;
 
-    if (button.draggable) {
-      button.addEventListener("dragstart", (event) => {
-        activeDraggedTool = button.dataset.tool;
-        event.dataTransfer.setData("text/plain", button.dataset.tool);
-        event.dataTransfer.effectAllowed = "copy";
-      });
+  const label = node.appendChild(document.createElement("em"));
+  label.textContent = name;
+  label.title = name;
 
-      button.addEventListener("dragend", () => {
-        clearDragState();
-      });
-    }
-  }
-
-  els.rungList.addEventListener("dragover", (event) => {
-    if (!event.target.closest(".rung-row") && isToolDrag(event)) {
-      event.preventDefault();
-      els.rungList.classList.add("drop-target");
-    }
-  });
-
-  els.rungList.addEventListener("dragleave", (event) => {
-    if (!els.rungList.contains(event.relatedTarget)) {
-      els.rungList.classList.remove("drop-target");
-    }
-  });
-
-  els.rungList.addEventListener("drop", (event) => {
-    const tool = draggedTool(event);
-    els.rungList.classList.remove("drop-target");
-    clearDragState();
-    if (!tool || event.target.closest(".rung-row")) return;
-    event.preventDefault();
-    applyTool(tool);
-  });
-
-  els.contactOpSelect.addEventListener("change", () => {
-    const context = ensureSelection();
-    if (!context || selectedNode.type !== "contact") return;
-    context.rung.contacts[selectedNode.index].op = els.contactOpSelect.value;
-    onLadderChanged();
-  });
-
-  els.pinSelect.addEventListener("change", () => {
-    const context = ensureSelection();
-    if (!context || selectedNode.type !== "contact") return;
-    context.rung.contacts[selectedNode.index].pin = els.pinSelect.value;
-    onLadderChanged();
-  });
-
-  els.coilSelect.addEventListener("change", () => {
-    const context = ensureSelection();
-    if (!context || selectedNode.type !== "coil") return;
-    context.rung.coil = els.coilSelect.value;
-    onLadderChanged();
-  });
-}
-
-function applyTool(tool, drop = null) {
-  if (tool === "rung") {
-    addRungAfter(drop?.rungId);
-    return;
-  }
-
-  if (tool === "contact-open") {
-    insertContact("XIC", drop);
-    return;
-  }
-
-  if (tool === "contact-closed") {
-    insertContact("XIO", drop);
-    return;
-  }
-
-  if (tool === "coil") {
-    selectCoil(drop?.rungId);
-    return;
-  }
-
-  if (tool === "delete") {
-    deleteSelection();
-    return;
-  }
-
-  if (tool === "move-left") {
-    moveSelectedContact(-1);
-    return;
-  }
-
-  if (tool === "move-right") {
-    moveSelectedContact(1);
-  }
-}
-
-function draggedTool(event) {
-  return event.dataTransfer?.getData("text/plain") || activeDraggedTool || "";
-}
-
-function isToolDrag(event) {
-  return Boolean(
-    activeDraggedTool ||
-      Array.from(event.dataTransfer?.types || []).some((type) => type === "text/plain"),
-  );
-}
-
-function draggedContact(event) {
-  const raw =
-    event.dataTransfer?.getData("application/x-silidox-contact") ||
-    (activeDraggedContact ? JSON.stringify(activeDraggedContact) : "");
-  if (!raw) return null;
-
-  try {
-    const value = JSON.parse(raw);
-    if (typeof value.rungId === "string" && Number.isInteger(value.index)) {
-      return value;
-    }
-  } catch {
-    return null;
-  }
-
-  return null;
-}
-
-function isContactDrag(event) {
-  return Boolean(
-    activeDraggedContact ||
-      Array.from(event.dataTransfer?.types || []).some(
-        (type) => type === "application/x-silidox-contact",
-      ),
-  );
-}
-
-function clearDragState() {
-  activeDraggedTool = "";
-  activeDraggedContact = null;
-}
-
-function addRungAfter(rungId = selectedNode?.rungId) {
-  const rung = createRung();
-  const index = ladder.findIndex((item) => item.id === rungId);
-  ladder.splice(index === -1 ? ladder.length : index + 1, 0, rung);
-  selectedNode = { rungId: rung.id, type: "contact", index: 0 };
-  onLadderChanged();
-}
-
-function insertContact(op, drop = null) {
-  const context = ensureSelectionForRung(drop?.rungId);
-  if (!context) return;
-
-  const insertAt =
-    typeof drop?.insertAt === "number" ? drop.insertAt : selectedInsertIndex(context.rung);
-  const index = Math.min(Math.max(0, insertAt), context.rung.contacts.length);
-  context.rung.contacts.splice(index, 0, { op, pin: "I0" });
-  selectedNode = { rungId: context.rung.id, type: "contact", index };
-  onLadderChanged();
-}
-
-function moveContact(source, drop) {
-  const from = ensureSelectionForRung(source.rungId);
-  const to = ensureSelectionForRung(drop?.rungId);
-  if (!from || !to) return;
-
-  const sourceIndex = source.index;
-  if (sourceIndex < 0 || sourceIndex >= from.rung.contacts.length) return;
-  if (from.rung.id !== to.rung.id && from.rung.contacts.length <= 1) return;
-
-  let insertAt = typeof drop?.insertAt === "number" ? drop.insertAt : to.rung.contacts.length;
-  insertAt = Math.min(Math.max(0, insertAt), to.rung.contacts.length);
-
-  const [contact] = from.rung.contacts.splice(sourceIndex, 1);
-  if (from.rung.id === to.rung.id && sourceIndex < insertAt) {
-    insertAt -= 1;
-  }
-  insertAt = Math.min(Math.max(0, insertAt), to.rung.contacts.length);
-  to.rung.contacts.splice(insertAt, 0, contact);
-
-  selectedNode = { rungId: to.rung.id, type: "contact", index: insertAt };
-  onLadderChanged();
-}
-
-function selectedInsertIndex(rung) {
-  if (selectedNode?.rungId !== rung.id) return rung.contacts.length;
-  if (selectedNode.type === "contact") return selectedNode.index + 1;
-  return rung.contacts.length;
-}
-
-function selectCoil(rungId = selectedNode?.rungId) {
-  const context = ensureSelectionForRung(rungId);
-  if (!context) return;
-
-  selectedNode = { rungId: context.rung.id, type: "coil" };
-  render();
-}
-
-function deleteSelection() {
-  const context = ensureSelection();
-  if (!context) return;
-
-  if (selectedNode.type === "rung") {
-    if (ladder.length <= 1) return;
-    ladder.splice(context.rungIndex, 1);
-    selectedNode = firstSelectable(ladder);
-    onLadderChanged();
-    return;
-  }
-
-  if (selectedNode.type !== "contact" || context.rung.contacts.length <= 1) return;
-
-  context.rung.contacts.splice(selectedNode.index, 1);
-  selectedNode.index = Math.max(0, selectedNode.index - 1);
-  onLadderChanged();
+  const value = node.appendChild(document.createElement("strong"));
+  value.textContent = "0";
+  return node;
 }
 
 function wireRunEvents() {
-  els.compileBtn.addEventListener("click", () => {
-    compileAndReport();
-    render();
-  });
-
   els.stepBtn.addEventListener("click", () => {
     stopRun();
     if (compileAndReport()) tick();
@@ -545,608 +314,555 @@ function wireRunEvents() {
     if (!compileAndReport()) return;
 
     let remaining = 30;
-    const cameraAtRunStart = state.cameraUnlocked;
+    const eventAtStart = state.eventSerial;
+    const epochAtStart = state.epoch;
     els.runBtn.textContent = "停止";
     runTimer = window.setInterval(() => {
       if (remaining <= 0 || state.halted) {
         stopRun();
         return;
       }
+
       tick();
-      if (!cameraAtRunStart && state.cameraUnlocked) {
-        stopRun();
-        return;
-      }
       remaining -= 1;
-    }, 130);
+      if (state.eventSerial !== eventAtStart || state.epoch !== epochAtStart) {
+        stopRun();
+      }
+    }, 150);
   });
 
   els.resetBtn.addEventListener("click", () => {
     stopRun();
-    state = createInitialState();
-    log("good", "local ladder retained; epoch rebooted");
+    state = createInitialState(meta.epoch);
+    log("good", "local ladder retained; current epoch rebooted");
     compileAndReport();
+    render();
+  });
+
+  els.newGameBtn.addEventListener("click", () => {
+    const confirmed = window.confirm("清除轮回记录和梯形图，从纪元 1 重新启动？");
+    if (!confirmed) return;
+    localStorage.removeItem(META_STORAGE_KEY);
+    localStorage.removeItem(LADDER_STORAGE_KEY);
+    window.location.reload();
+  });
+
+  els.drawQiBtn.addEventListener("click", () => {
+    drawQi("manual");
+    render();
+  });
+
+  els.breathUpgradeBtn.addEventListener("click", () => {
+    upgradeBreathMethod();
+    render();
+  });
+
+  els.foundationBtn.addEventListener("click", () => {
+    consolidateFoundation();
+    render();
+  });
+
+  els.spiritArrayBtn.addEventListener("click", () => {
+    buildSpiritArray();
+    render();
+  });
+
+  els.breakthroughBtn.addEventListener("click", () => {
+    breakthroughRealm();
     render();
   });
 }
 
-function moveSelectedContact(direction) {
-  const context = ensureSelection();
-  if (!context || selectedNode.type !== "contact") return;
-
-  const from = selectedNode.index;
-  const to = from + direction;
-  if (to < 0 || to >= context.rung.contacts.length) return;
-
-  const [contact] = context.rung.contacts.splice(from, 1);
-  context.rung.contacts.splice(to, 0, contact);
-  selectedNode.index = to;
-  onLadderChanged();
+function currentRealm() {
+  return REALMS[state.cultivation.realm] ?? REALMS[0];
 }
 
-function ensureSelection() {
-  if (ladder.length === 0) {
-    const rung = createRung();
-    ladder.push(rung);
-    selectedNode = { rungId: rung.id, type: "contact", index: 0 };
+function cultivationUnlocked() {
+  return Boolean(state.cameraUnlocked);
+}
+
+function worldVisible() {
+  return cultivationUnlocked() || (state.stage !== "boot" && state.stage !== "remap");
+}
+
+function nextRealm() {
+  return REALMS[state.cultivation.realm + 1] ?? null;
+}
+
+function realmMultiplier() {
+  return 1 + state.cultivation.realm * 0.38;
+}
+
+function yinPerScan() {
+  return state.cultivation.yinLevel * 0.035 * realmMultiplier();
+}
+
+function yangPerScan() {
+  return (
+    state.cultivation.yangLevel *
+    0.028 *
+    (1 + state.cultivation.foundation * 0.025) *
+    realmMultiplier()
+  );
+}
+
+function breathCost() {
+  return Math.ceil(8 * 1.45 ** state.cultivation.yinLevel);
+}
+
+function foundationCost() {
+  return Math.ceil(12 + state.cultivation.foundation * 6 + state.cultivation.realm * 18);
+}
+
+function spiritArrayCost() {
+  return Math.ceil(26 * 1.62 ** state.cultivation.yangLevel + state.cultivation.realm * 24);
+}
+
+function spiritArrayFoundationRequirement() {
+  return 2 + state.cultivation.yangLevel * 2;
+}
+
+function drawQi(source) {
+  if (!cultivationUnlocked()) return;
+
+  const baseGain = source === "ladder" ? 0.22 : 1;
+  const amount = baseGain * (1 + state.cultivation.yinLevel * 0.18) * realmMultiplier();
+  gainQi(amount);
+  state.cultivation.manualDraws += source === "manual" ? 1 : 0;
+
+  if (source === "manual") {
+    log("good", `取灵 +${formatQi(amount)}；灵气=${formatQi(state.cultivation.qi)}`);
+  } else if (state.tick % 10 === 0) {
+    log("info", `阴阀自动取灵 +${formatQi(amount)}`);
   }
 
-  let rungIndex = ladder.findIndex((rung) => rung.id === selectedNode?.rungId);
-  if (rungIndex === -1) {
-    selectedNode = firstSelectable(ladder);
-    rungIndex = 0;
+  persistCultivation();
+}
+
+function upgradeBreathMethod() {
+  if (!cultivationUnlocked()) return;
+
+  const cost = breathCost();
+  if (!spendQi(cost)) return;
+
+  state.cultivation.yinLevel += 1;
+  log("good", `吐纳法校准至 ${state.cultivation.yinLevel} 阶；被动取灵增强`);
+  persistCultivation();
+}
+
+function consolidateFoundation() {
+  if (!cultivationUnlocked()) return;
+
+  const cost = foundationCost();
+  if (!spendQi(cost)) return;
+
+  state.cultivation.foundation += 1;
+  log("good", `固本完成；根基=${state.cultivation.foundation}`);
+  persistCultivation();
+}
+
+function buildSpiritArray() {
+  if (!cultivationUnlocked()) return;
+
+  const cost = spiritArrayCost();
+  const requiredFoundation = spiritArrayFoundationRequirement();
+  if (state.cultivation.foundation < requiredFoundation || !spendQi(cost)) return;
+
+  state.cultivation.yangLevel += 1;
+  addCultivationAttention(5 + state.cultivation.yangLevel);
+  log("warn", `生灵阵拓展至 ${state.cultivation.yangLevel} 阶；天道注视上升`);
+  persistCultivation();
+}
+
+function breakthroughRealm() {
+  if (!cultivationUnlocked()) return;
+
+  const target = nextRealm();
+  if (!target) return;
+  if (state.cultivation.foundation < target.foundation || !spendQi(target.qi)) return;
+
+  state.cultivation.realm += 1;
+  state.cultivation.breakthroughs += 1;
+  state.cultivation.attention = Math.max(0, state.cultivation.attention - 8);
+  log("good", `突破：${target.name}`);
+  persistCultivation();
+}
+
+function advanceCultivation() {
+  if (!cultivationUnlocked()) return;
+
+  const yin = yinPerScan();
+  const yang = yangPerScan();
+  const total = yin + yang;
+  if (total > 0) gainQi(total);
+
+  if (yang > 0) {
+    addCultivationAttention(yang * 0.18);
+  } else {
+    state.cultivation.attention = Math.max(0, state.cultivation.attention - 0.012);
   }
 
-  const rung = ladder[rungIndex];
-  if (!selectedNode) return null;
-
-  if (selectedNode.type === "contact") {
-    selectedNode.index = Math.min(Math.max(0, selectedNode.index), rung.contacts.length - 1);
-  }
-
-  return { rung, rungIndex };
+  if (total > 0 || state.cultivation.attention > 0) persistCultivation();
 }
 
-function ensureSelectionForRung(rungId) {
-  if (!rungId) return ensureSelection();
-
-  const rungIndex = ladder.findIndex((rung) => rung.id === rungId);
-  if (rungIndex === -1) return ensureSelection();
-
-  return { rung: ladder[rungIndex], rungIndex };
+function gainQi(amount) {
+  if (amount <= 0) return;
+  state.cultivation.qi += amount;
+  state.cultivation.lifetimeQi += amount;
 }
 
-function onLadderChanged() {
-  saveLadder();
-  compiled = compileLadder(ladder);
-  render();
+function spendQi(amount) {
+  if (state.cultivation.qi + 0.0001 < amount) return false;
+  state.cultivation.qi = Math.max(0, state.cultivation.qi - amount);
+  return true;
 }
 
-function compileAndReport() {
-  compiled = compileLadder(ladder);
-  if (compiled.ok) {
-    log("good", `compiled ${compiled.rungs.length} rung(s)`);
-    return true;
-  }
-
-  for (const diagnostic of compiled.diagnostics) {
-    log("bad", diagnostic);
-  }
-  render();
-  return false;
+function addCultivationAttention(amount) {
+  state.cultivation.attention = Math.min(100, state.cultivation.attention + amount);
 }
 
-function compileLadder(program) {
-  const rungs = [];
-  const diagnostics = [];
-
-  program.forEach((rung, index) => {
-    const lineNo = index + 1;
-    const before = diagnostics.length;
-
-    if (!rung.contacts || rung.contacts.length === 0) {
-      diagnostics.push(`R${lineNo}: missing contact`);
-    }
-
-    const contacts = [];
-    for (const contact of rung.contacts || []) {
-      if (contact.op !== "XIC" && contact.op !== "XIO") {
-        diagnostics.push(`R${lineNo}: unknown contact ${contact.op}`);
-        continue;
-      }
-      if (!isKnownPin(contact.pin)) {
-        diagnostics.push(`R${lineNo}: unknown input ${contact.pin}`);
-        continue;
-      }
-      contacts.push({ op: contact.op, pin: contact.pin });
-    }
-
-    if (!OUTPUTS[rung.coil]) {
-      diagnostics.push(`R${lineNo}: unknown coil ${rung.coil}`);
-    }
-
-    if (diagnostics.length === before && contacts.length > 0) {
-      rungs.push({ id: rung.id, lineNo, contacts, coil: rung.coil });
-    }
-  });
-
-  if (rungs.length === 0) diagnostics.push("no energized logic found");
-  return { ok: diagnostics.length === 0, rungs, diagnostics };
+function persistCultivation() {
+  meta.cultivation = cloneCultivation(state.cultivation);
+  saveMeta();
 }
 
-function isKnownPin(pin) {
-  return PINS.some(([knownPin]) => knownPin === pin);
+function formatQi(value) {
+  if (value >= 1000) return value.toFixed(0);
+  if (value >= 100) return value.toFixed(1);
+  if (value >= 10) return value.toFixed(1);
+  return value.toFixed(2).replace(/\.?0+$/, "");
 }
 
 function tick() {
   if (state.halted) return;
 
   state.tick += 1;
-  state.energy = Math.max(0, state.energy - 1);
+  state.energy = Math.max(0, state.energy - 0.5);
+  state.core = Math.max(0, state.core - 3);
+  advanceLedgerHardware();
 
   const sensors = readSensors();
+  observeSignals(sensors);
+  state.pickupPulse = false;
   const activeOutputs = evaluateRungs(sensors);
-  const selected = ACTION_PRIORITY.find((pin) => activeOutputs.includes(pin));
+  state.lastScan = {
+    tick: state.tick,
+    sensors: { ...sensors },
+    outputs: [...activeOutputs],
+  };
+  advanceCultivation();
+  const pulseActive = activeOutputs.includes("Q4");
+  const motionOutputs = activeOutputs.filter((pin) => pin !== "Q4");
+  const selected = MOTION_PRIORITY.find((pin) => motionOutputs.includes(pin));
+  const actuatorInterlocked = state.stage === "boot" || state.stage === "remap";
 
-  if (activeOutputs.length > 1) {
-    log("warn", `coil contention: ${activeOutputs.map((pin) => OUTPUTS[pin]).join(", ")}`);
+  if (motionOutputs.length > 1) {
+    log("warn", `bus contention: ${motionOutputs.map((pin) => OUTPUTS[pin]).join(", ")}`);
   }
 
-  applyAction(selected || "Q4");
+  if (pulseActive) applyHeartPulse();
 
-  if (state.energy <= 0) {
+  if (selected && actuatorInterlocked) {
+    if (state.stage !== "complete" && state.tick % 4 === 0) {
+      log("warn", "actuator interlock: core pulse not stable");
+    }
+  } else if (selected) {
+    applyAction(selected);
+  } else if (!pulseActive && state.tick % 8 === 0) {
+    log("info", "idle scan; no output energized");
+  }
+
+  if (state.core <= 0) {
+    state.halted = true;
+    log("bad", "core pulse lost; epoch halted");
+  } else if (state.energy <= 0) {
     state.halted = true;
     log("bad", "energy bus collapsed; epoch halted");
   }
 
-  if (driftValue() > 3.4e-13) {
-    state.halted = true;
-    log("bad", "float calamity: heaven tolerance exceeded");
-  }
-
-  if (state.wood >= 3 && !state.cameraUnlocked) {
-    state.cameraUnlocked = true;
-    state.energy = Math.min(100, state.energy + 24);
-    log("good", "workaround forged: low-res photo sensor mounted");
-    log("info", "perception bus now leaks grayscale world data");
-  }
-
+  advanceHeavenResponse();
   render();
 }
 
-function readSensors() {
-  const front = frontCell();
-  const cell = tileAt(front.x, front.y);
-  const blocked = cell === "#";
-  const tree = cell === "T";
-  const cargoFull = state.robot.cargo >= 1;
-  const atHomeNow = atHome();
-  const dir = DIRS[state.robot.dir];
-  const currentDistance = manhattan(state.robot, state.home);
-  const nextDistance = manhattan(
-    { x: state.robot.x + dir.dx, y: state.robot.y + dir.dy },
-    state.home,
-  );
-  const homeVectorAhead = atHomeNow || nextDistance < currentDistance;
+function applyHeartPulse() {
+  state.energy = Math.max(0, state.energy - 1);
+  if (state.core > 45) {
+    if (cultivationUnlocked()) {
+      const amount =
+        0.14 *
+        (1 + state.cultivation.yangLevel * 0.42) *
+        (1 + state.cultivation.foundation * 0.02) *
+        realmMultiplier();
+      gainQi(amount);
+      addCultivationAttention(0.04 + amount * 0.08);
+      persistCultivation();
+      if (state.tick % 6 === 0) {
+        log("warn", `阳性脉冲生灵 +${formatQi(amount)}；core=${Math.ceil(state.core)}`);
+      }
+    } else if (state.tick % 6 === 0) {
+      log("warn", `heart pulse rejected; core=${Math.ceil(state.core)}`);
+    }
+    return;
+  }
 
+  state.core = Math.min(100, state.core + 34);
+  state.corePulses += 1;
+  discoverSignal(SIGNALS.CORE_LOW, DISCOVERY.CONFIRMED);
+  log("good", `heart pulse accepted; core=${Math.ceil(state.core)}`);
+
+  if (state.corePulses >= 2 && (state.stage === "boot" || state.stage === "remap")) {
+    if (state.epoch > 0) {
+      setStage("complete");
+      meta.complete = true;
+      saveMeta();
+      log("good", "vertical slice complete: archived code survived a hostile ABI change");
+    } else {
+      setStage("salvage");
+      log("good", "core stable; actuator interlock released");
+      log("info", "one-dimensional rail unlocked; collect fragments before cultivation");
+    }
+  }
+}
+
+function readSensors() {
+  const raw = readRawSignals();
+  const pins = {};
+  for (const pin of PIN_IDS) {
+    pins[pin] = Boolean(raw[state.pinMap[pin]]);
+  }
+  for (const [pin, constant] of Object.entries(LOGIC_CONSTANTS)) {
+    pins[pin] = constant.value;
+  }
+  return pins;
+}
+
+function readRawSignals() {
   return {
-    I0: blocked,
-    I1: tree,
-    I2: cargoFull,
-    I3: atHomeNow,
-    I4: homeVectorAhead,
-    I5: state.lastCollision,
-    I6: state.tick % 8 === 0,
-    I7: cell === "." || cell === "H",
+    [SIGNALS.DRIVE_STALL]: state.contact.stall || !canMoveForward(),
+    [SIGNALS.FIBER_ECHO]: state.contact.fiber || fragmentAtRobot(),
+    [SIGNALS.PICKUP_PULSE]: state.pickupPulse,
+    [SIGNALS.ORIGIN_MARK]: atOrigin(),
+    [SIGNALS.MAG_WEST]: state.robot.dir < 0,
+    [SIGNALS.LEDGER_WINDOW]: ledgerWindowOpen(),
+    [SIGNALS.SETTLEMENT_ACK]: state.ledger.ack,
+    [SIGNALS.CORE_LOW]: state.core <= 45,
   };
 }
 
-function evaluateRungs(sensors) {
-  const active = [];
-  for (const rung of compiled.rungs) {
-    if (isRungEnergized(rung, sensors) && !active.includes(rung.coil)) {
-      active.push(rung.coil);
-    }
-  }
-  return active;
-}
-
-function isRungEnergized(rung, sensors) {
-  return rung.contacts.every((contact) => {
-    const value = Boolean(sensors[contact.pin]);
-    return contact.op === "XIC" ? value : !value;
-  });
-}
-
 function applyAction(coil) {
-  state.lastCollision = false;
-
   if (coil === "Q3") {
-    if (state.robot.cargo > 0 && atHome()) {
-      state.robot.cargo = 0;
-      state.wood += 1;
-      log("good", `deposited wood; stockpile=${state.wood}`);
+    if (state.ledger.offering) {
+      attemptLedgerWrite();
+    } else if (cultivationUnlocked()) {
+      drawQi("ladder");
     } else {
-      log("warn", "deposit failed: cargo/home precondition false");
+      log("warn", "bus write offline; no writable interface");
     }
     return;
   }
 
   if (coil === "Q2") {
-    const front = frontCell();
-    if (tileAt(front.x, front.y) === "T" && state.robot.cargo < 1) {
-      state.grid[front.y][front.x] = ".";
-      state.robot.cargo = 1;
-      state.energy = Math.max(0, state.energy - 2);
-      log("good", `chopped tree at ${front.x},${front.y}; cargo=1`);
+    const fragmentIndex = state.track.fragments.indexOf(state.robot.x);
+    if (fragmentIndex !== -1) {
+      state.track.fragments.splice(fragmentIndex, 1);
+      state.parts += 1;
+      state.pickupPulse = true;
+      discoverSignal(SIGNALS.FIBER_ECHO, DISCOVERY.CONFIRMED);
+      discoverSignal(SIGNALS.PICKUP_PULSE, DISCOVERY.SUSPECTED);
+      state.energy = Math.max(0, state.energy - 1.5);
+      clearContactProbe();
+      log("good", `pickup complete at rail ${state.robot.x}; fragments=${state.parts}/3`);
+      if (state.parts >= 3 && !cultivationUnlocked()) unlockCultivationInterface();
     } else {
-      log("warn", "chop returned 0; no tree or cargo full");
+      log("warn", "pickup returned 0; no fragment here");
     }
     return;
   }
 
   if (coil === "Q1") {
-    state.robot.dir = (state.robot.dir + 1) % DIRS.length;
-    log("info", `turn right; facing=${DIRS[state.robot.dir].name}`);
+    state.robot.dir *= -1;
+    if (state.robot.dir < 0) {
+      discoverSignal(SIGNALS.MAG_WEST, DISCOVERY.SUSPECTED);
+    }
+    clearContactProbe();
+    log("info", `reverse rail direction; magnetometer=${state.robot.dir < 0 ? "W" : "E"}`);
     return;
   }
 
   if (coil === "Q0") {
-    const front = frontCell();
-    const cell = tileAt(front.x, front.y);
-    if (cell === "." || cell === "H") {
-      state.robot.x = front.x;
-      state.robot.y = front.y;
-      log("info", `move ok; pos=${state.robot.x},${state.robot.y}`);
+    if (canMoveForward()) {
+      state.robot.x += state.robot.dir;
+      if (state.robot.dir < 0) {
+        discoverSignal(SIGNALS.MAG_WEST, DISCOVERY.CONFIRMED);
+      }
+      if (atOrigin()) discoverSignal(SIGNALS.ORIGIN_MARK, DISCOVERY.CONFIRMED);
+      if (fragmentAtRobot()) {
+        state.contact.fiber = true;
+        discoverSignal(SIGNALS.FIBER_ECHO, DISCOVERY.SUSPECTED);
+      }
+      clearContactProbe();
+      log("info", `rail step; pos=${state.robot.x}`);
     } else {
-      state.lastCollision = true;
-      state.energy = Math.max(0, state.energy - 2);
-      log("bad", `collision=${cell || "void"}; pos unchanged`);
+      state.contact.stall = true;
+      recordSignalEvidence(SIGNALS.DRIVE_STALL);
+      state.energy = Math.max(0, state.energy - 1.5);
+      log("warn", `rail boundary; pos=${state.robot.x}`);
+    }
+  }
+}
+
+function clearContactProbe() {
+  state.contact.stall = false;
+  state.contact.fiber = false;
+}
+
+function unlockCultivationInterface() {
+  state.cameraUnlocked = true;
+  state.energy = Math.min(100, state.energy + 28);
+  setStage("cultivation");
+  log("good", "aura interface restored: cultivation furnace online");
+  log("info", "survival loop closed; begin low-level extraction and foundation work");
+}
+
+function ledgerPhaseIndex() {
+  if (!state.cameraUnlocked) return -1;
+  const relative = state.tick - state.ledger.windowOrigin;
+  return ((relative % 6) + 6) % 6;
+}
+
+function ledgerWindowOpen() {
+  if (!state.cameraUnlocked || !state.ledger.offering) return false;
+  const phase = ledgerPhaseIndex();
+  return phase === 0 || phase === 1;
+}
+
+function attemptLedgerWrite() {
+  if (!state.ledger.offering) {
+    log("warn", "ledger write rejected; physical sample absent");
+    return;
+  }
+  if (!ledgerWindowOpen()) {
+    log("warn", `ledger write missed; phase=${ledgerPhaseName()}`);
+    return;
+  }
+
+  discoverSignal(SIGNALS.LEDGER_WINDOW, DISCOVERY.CONFIRMED);
+  if (state.ledger.ack) {
+    discoverSignal(SIGNALS.SETTLEMENT_ACK, DISCOVERY.CONFIRMED);
+  }
+
+  state.aura += 1;
+  gainQi(3 * realmMultiplier());
+  persistCultivation();
+  state.ledger.creditsForOffering += 1;
+  if (!state.ledger.ack) {
+    state.ledger.ack = true;
+    state.ledger.consumeAt = state.tick + 2;
+    log("good", "ledger credit +1; physical latch pending for 2 scans");
+    return;
+  }
+
+  if (!state.ledger.duplicateDetected) {
+    state.ledger.duplicateDetected = true;
+    state.heavenAttention = 100;
+    state.calamityCountdown = 8;
+    setStage("alert");
+    log("bad", "invariant breach: one physical sample credited twice");
+    log("warn", "heaven observer attached; patch signature compiling");
+  }
+}
+
+function advanceLedgerHardware() {
+  const ledger = state.ledger;
+  if (ledger.consumeAt !== null && state.tick >= ledger.consumeAt) {
+    ledger.offering = false;
+    ledger.ack = false;
+    ledger.consumeAt = null;
+    ledger.creditsForOffering = 0;
+    if (!ledger.duplicateDetected) ledger.respawnAt = state.tick + 4;
+    log("info", "physical latch closed; sample consumed");
+  }
+
+  if (
+    state.stage === "ledger" &&
+    !ledger.offering &&
+    ledger.respawnAt !== null &&
+    state.tick >= ledger.respawnAt
+  ) {
+    ledger.offering = true;
+    ledger.respawnAt = null;
+    log("info", "condenser produced one replacement sample");
+  }
+}
+
+function advanceHeavenResponse() {
+  if (state.stage !== "alert" || state.calamityCountdown === null) return;
+
+  state.calamityCountdown -= 1;
+  state.heavenAttention = Math.max(0, state.calamityCountdown * 12.5);
+  if (state.calamityCountdown > 0) {
+    if (state.calamityCountdown <= 3) {
+      log("bad", `heaven patch commit in ${state.calamityCountdown} scan(s)`);
     }
     return;
   }
 
-  log("info", "wait; no coil selected");
+  reincarnate();
+}
+
+function reincarnate() {
+  meta.epoch += 1;
+  meta.patchLevel = Math.max(meta.patchLevel, 1);
+  saveMeta();
+
+  const nextSerial = state.eventSerial + 1;
+  state = createInitialState(meta.epoch);
+  state.eventSerial = nextSerial;
+  showEpochOverlay();
+}
+
+function setStage(stage) {
+  if (state.stage === stage) return;
+  state.stage = stage;
+  state.eventSerial += 1;
 }
 
 function render() {
-  const sensors = readSensors();
-  renderSensors(sensors);
+  const sensors = state.lastScan?.sensors ?? readSensors();
+  const activeOutputs = state.lastScan?.outputs ?? evaluateRungs(sensors);
+  renderSensors(sensors, activeOutputs);
   renderEditor(sensors);
   renderLog();
   renderCanvas();
   renderMetrics();
+  renderLedger();
+  renderCultivation();
 }
 
-function renderEditor(sensors) {
-  ensureSelection();
-  updateInspector();
-  els.rungList.innerHTML = "";
-
-  const width = ladder.reduce((max, rung) => Math.max(max, diagramWidth(rung)), 360);
-  const energized = new Set(
-    compiled.rungs
-      .filter((rung) => isRungEnergized(rung, sensors))
-      .map((rung) => rung.id),
-  );
-
-  for (let index = 0; index < ladder.length; index += 1) {
-    const rung = ladder[index];
-    renderRungRow({ rung, index, width }, energized.has(rung.id));
-  }
-}
-
-function diagramWidth(rung) {
-  return 76 + rung.contacts.length * 92 + 108;
-}
-
-function renderRungRow({ rung, index, width }, energized) {
-  const row = els.rungList.appendChild(document.createElement("article"));
-  row.className = "rung-row";
-  row.classList.toggle("energized", energized);
-  row.classList.toggle("selected", selectedNode?.rungId === rung.id);
-  row.style.width = `${width + 20}px`;
-
-  const header = row.appendChild(document.createElement("div"));
-  header.className = "rung-row-header";
-  header.addEventListener("click", () => {
-    selectedNode = { rungId: rung.id, type: "rung" };
-    renderEditor(readSensors());
-  });
-
-  const title = header.appendChild(document.createElement("strong"));
-  title.textContent = `R${index + 1}`;
-
-  const status = header.appendChild(document.createElement("span"));
-  status.className = "rung-state";
-  status.textContent = energized ? "ON" : "OFF";
-
-  const diagram = row.appendChild(document.createElement("div"));
-  diagram.className = "rung-diagram";
-  const svg = renderLadDiagram(diagram, rung, width);
-
-  markSelectedShape(diagram, rung);
-  svg.addEventListener("dragstart", (event) => {
-    const shape = event.target.closest("g.shape");
-    if (!shape || shape.dataset.kind !== "contact") return;
-
-    const index = Number(shape.dataset.index);
-    activeDraggedContact = { rungId: rung.id, index };
-    event.dataTransfer.setData(
-      "application/x-silidox-contact",
-      JSON.stringify(activeDraggedContact),
-    );
-    event.dataTransfer.effectAllowed = "move";
-    shape.classList.add("dragging");
-    selectedNode = { rungId: rung.id, type: "contact", index };
-  });
-
-  svg.addEventListener("dragend", () => {
-    clearDragState();
-  });
-
-  svg.addEventListener("click", (event) => {
-    const shape = event.target.closest("g.shape");
-    if (!shape) {
-      selectedNode = { rungId: rung.id, type: "rung" };
-      renderEditor(readSensors());
-      return;
-    }
-
-    if (shape.dataset.kind === "contact") {
-      const childIndex = Number(shape.dataset.index);
-      selectedNode = { rungId: rung.id, type: "contact", index: childIndex };
-    } else if (shape.dataset.kind === "coil") {
-      selectedNode = { rungId: rung.id, type: "coil" };
-    } else {
-      selectedNode = { rungId: rung.id, type: "rung" };
-    }
-    renderEditor(readSensors());
-  });
-
-  row.addEventListener("dragover", (event) => {
-    if (!isToolDrag(event) && !isContactDrag(event)) return;
-    event.preventDefault();
-    event.dataTransfer.dropEffect = isContactDrag(event) ? "move" : "copy";
-    row.classList.add("drop-target");
-  });
-
-  row.addEventListener("dragleave", (event) => {
-    if (!row.contains(event.relatedTarget)) {
-      row.classList.remove("drop-target");
-    }
-  });
-
-  row.addEventListener("drop", (event) => {
-    const tool = draggedTool(event);
-    const contactMove = draggedContact(event);
-    row.classList.remove("drop-target");
-    clearDragState();
-    if (!tool && !contactMove) return;
-
-    event.preventDefault();
-    event.stopPropagation();
-    const drop = dropContextFromEvent(event, rung);
-    if (contactMove) {
-      moveContact(contactMove, drop);
-    } else {
-      applyTool(tool, drop);
-    }
-  });
-}
-
-function dropContextFromEvent(event, rung) {
-  const shape = event.target.closest("g.shape");
-  if (!shape) return { rungId: rung.id, insertAt: rung.contacts.length };
-
-  if (shape.dataset.kind === "contact") {
-    return { rungId: rung.id, insertAt: Number(shape.dataset.index) + 1 };
-  }
-
-  return { rungId: rung.id, insertAt: rung.contacts.length };
-}
-
-function renderLadDiagram(parent, rung, width) {
-  const shell = parent.appendChild(document.createElement("div"));
-  shell.className = "lad-svg-shell";
-  shell.style.width = `${width}px`;
-
-  const svg = shell.appendChild(createSvg("svg"));
-  svg.classList.add("lad");
-  svg.setAttribute("viewBox", `0 0 ${width} 78`);
-  svg.setAttribute("width", String(width));
-  svg.setAttribute("height", "78");
-  svg.setAttribute("preserveAspectRatio", "xMinYMin meet");
-
-  const y = 44;
-  line(svg, LAD_DIMENSIONS.leftRail, 12, LAD_DIMENSIONS.leftRail, 68, "2");
-  line(svg, rightRailX(width), 12, rightRailX(width), 68, "2");
-  renderRungWires(svg, rung, width, y);
-
-  for (let index = 0; index < rung.contacts.length; index += 1) {
-    renderContact(svg, contactX(index), y, rung.contacts[index], index);
-  }
-  renderCoil(svg, coilX(width), y, rung.coil);
-
-  return svg;
-}
-
-function renderRungWires(svg, rung, width, y) {
-  let cursor = LAD_DIMENSIONS.leftRail;
-
-  for (let index = 0; index < rung.contacts.length; index += 1) {
-    const x = contactX(index);
-    wire(svg, cursor, x - LAD_DIMENSIONS.contactConnector, y);
-    cursor = x + LAD_DIMENSIONS.contactConnector;
-  }
-
-  const outputX = coilX(width);
-  wire(svg, cursor, outputX - LAD_DIMENSIONS.coilConnector, y);
-  wire(svg, outputX + LAD_DIMENSIONS.coilConnector, rightRailX(width), y);
-}
-
-function contactX(index) {
-  return LAD_DIMENSIONS.contactStartX + index * LAD_DIMENSIONS.contactPitch;
-}
-
-function coilX(width) {
-  return width - LAD_DIMENSIONS.coilRightInset;
-}
-
-function rightRailX(width) {
-  return width - LAD_DIMENSIONS.rightRailInset;
-}
-
-function wire(svg, x1, x2, y) {
-  if (x2 <= x1) return null;
-  return line(svg, x1, y, x2, y, "1");
-}
-
-function renderContact(svg, x, y, contact, index) {
-  const g = shapeGroup(svg, x, y, "contact", index);
-  label(g, contact.pin, -20);
-  path(g, "M-10,-10 L-10,10");
-  path(g, "M10,-10 L10,10");
-  if (contact.op === "XIO") {
-    path(g, "M-6,10 L6,-10").classList.add("node-mark");
-  }
-}
-
-function renderCoil(svg, x, y, coil) {
-  const g = shapeGroup(svg, x, y, "coil");
-  label(g, coil, -20);
-  path(g, "M-7,-10 C-13,-8 -13,8 -7,10");
-  path(g, "M7,-10 C13,-8 13,8 7,10");
-}
-
-function shapeGroup(svg, x, y, kind, index = "") {
-  const g = svg.appendChild(createSvg("g"));
-  g.classList.add("shape");
-  g.dataset.kind = kind;
-  if (index !== "") g.dataset.index = String(index);
-  g.setAttribute("transform", `translate(${x},${y})`);
-  if (kind === "contact") {
-    g.setAttribute("draggable", "true");
-  }
-
-  const rect = g.appendChild(createSvg("rect"));
-  rect.classList.add("node-rect");
-  rect.setAttribute("x", "-38");
-  rect.setAttribute("y", "-36");
-  rect.setAttribute("width", "76");
-  rect.setAttribute("height", "64");
-  return g;
-}
-
-function label(parent, text, y) {
-  const node = parent.appendChild(createSvg("text"));
-  node.textContent = text;
-  node.setAttribute("y", String(y));
-  node.setAttribute("text-anchor", "middle");
-}
-
-function line(parent, x1, y1, x2, y2, strokeWidth) {
-  const node = parent.appendChild(createSvg("line"));
-  node.setAttribute("x1", String(x1));
-  node.setAttribute("y1", String(y1));
-  node.setAttribute("x2", String(x2));
-  node.setAttribute("y2", String(y2));
-  node.setAttribute("stroke-width", strokeWidth);
-  return node;
-}
-
-function path(parent, d) {
-  const node = parent.appendChild(createSvg("path"));
-  node.setAttribute("d", d);
-  node.setAttribute("fill", "none");
-  return node;
-}
-
-function createSvg(tagName) {
-  return document.createElementNS("http://www.w3.org/2000/svg", tagName);
-}
-
-function markSelectedShape(diagram, rung) {
-  if (selectedNode?.rungId !== rung.id) return;
-
-  for (const shape of diagram.querySelectorAll("g.shape")) {
-    if (
-      (selectedNode.type === "contact" &&
-        shape.dataset.kind === "contact" &&
-        Number(shape.dataset.index) === selectedNode.index) ||
-      (selectedNode.type === "coil" && shape.dataset.kind === "coil")
-    ) {
-      shape.classList.add("selected");
-    }
-  }
-}
-
-function updateInspector() {
-  const context = ensureSelection();
-  const isContact = selectedNode?.type === "contact";
-  const isCoil = selectedNode?.type === "coil";
-  const isRung = selectedNode?.type === "rung";
-
-  els.contactOpSelect.disabled = !isContact;
-  els.pinSelect.disabled = !isContact;
-  els.coilSelect.disabled = !isCoil;
-  els.deleteNodeBtn.disabled =
-    !(isContact && context.rung.contacts.length > 1) && !(isRung && ladder.length > 1);
-  els.moveLeftBtn.disabled = !isContact || selectedNode.index <= 0;
-  els.moveRightBtn.disabled = !isContact || selectedNode.index >= context.rung.contacts.length - 1;
-
-  if (isContact) {
-    const contact = context.rung.contacts[selectedNode.index];
-    els.contactOpSelect.value = contact.op;
-    els.pinSelect.value = contact.pin;
-  }
-
-  if (isCoil) {
-    els.coilSelect.value = context.rung.coil;
-  }
-
-  renderPinPicker(context, { isContact, isCoil });
-}
-
-function renderPinPicker(context, mode) {
-  els.pinPicker.innerHTML = "";
-
-  if (mode.isContact) {
-    const selectedPin = context.rung.contacts[selectedNode.index].pin;
-    renderPinButtons(PINS, selectedPin, (pin) => {
-      context.rung.contacts[selectedNode.index].pin = pin;
-      onLadderChanged();
-    });
-    return;
-  }
-
-  if (mode.isCoil) {
-    const entries = Object.entries(OUTPUTS);
-    renderPinButtons(entries, context.rung.coil, (pin) => {
-      context.rung.coil = pin;
-      onLadderChanged();
-    });
-  }
-}
-
-function renderPinButtons(entries, selected, onPick) {
-  for (const [pin, name] of entries) {
-    const button = els.pinPicker.appendChild(document.createElement("button"));
-    button.type = "button";
-    button.className = "pin-button";
-    button.classList.toggle("selected", pin === selected);
-    button.title = name;
-    button.textContent = pin;
-    button.addEventListener("click", () => onPick(pin));
-  }
-}
-
-function renderSensors(sensors) {
-  for (const [pin] of PINS) {
+function renderSensors(sensors, outputs) {
+  for (const pin of PIN_IDS) {
     const node = els.sensorBank.querySelector(`[data-pin="${pin}"]`);
+    const level = discoveryLevel(pin);
     node.classList.toggle("hot", Boolean(sensors[pin]));
+    node.classList.toggle("suspected", level === DISCOVERY.SUSPECTED);
+    node.classList.toggle("identified", level === DISCOVERY.CONFIRMED);
+    const label = node.querySelector("em");
+    label.textContent = inputSignalLabel(pin);
+    label.title = label.textContent;
     node.querySelector("strong").textContent = sensors[pin] ? "1" : "0";
   }
+
+  const activeOutputs = new Set(outputs);
+  for (const pin of Object.keys(OUTPUTS)) {
+    const node = els.outputBank.querySelector(`[data-pin="${pin}"]`);
+    const active = activeOutputs.has(pin);
+    node.classList.toggle("hot", active);
+    node.querySelector("strong").textContent = active ? "1" : "0";
+  }
+
+  els.ioScanReadout.textContent = state.lastScan
+    ? `SCAN t+${String(state.lastScan.tick).padStart(4, "0")}`
+    : "PRE-SCAN";
 }
 
 function renderLog() {
@@ -1168,10 +884,7 @@ function renderLog() {
 }
 
 function scrollLogToBottom() {
-  if (logScrollFrame !== null) {
-    window.cancelAnimationFrame(logScrollFrame);
-  }
-
+  if (logScrollFrame !== null) window.cancelAnimationFrame(logScrollFrame);
   logScrollFrame = window.requestAnimationFrame(() => {
     els.logWindow.scrollTop = els.logWindow.scrollHeight;
     logScrollFrame = null;
@@ -1182,129 +895,218 @@ function renderCanvas() {
   const width = els.worldCanvas.width;
   const height = els.worldCanvas.height;
   ctx.clearRect(0, 0, width, height);
-
   ctx.fillStyle = "#020303";
   ctx.fillRect(0, 0, width, height);
 
-  const cols = state.grid[0].length;
-  const rows = state.grid.length;
-  const tile = Math.floor(Math.min(width / cols, height / rows));
+  const cols = state.track.length;
+  const tile = Math.floor(Math.min(width / (cols + 1.6), height / 3.2));
   const ox = Math.floor((width - cols * tile) / 2);
-  const oy = Math.floor((height - rows * tile) / 2);
+  const y = Math.floor(height / 2 - tile / 2);
 
-  if (!state.cameraUnlocked) {
-    drawNoise(width, height);
+  if (!worldVisible()) drawNoise(width, height);
+
+  for (let index = 0; index < cols; index += 1) {
+    drawTrackCell(index, ox + index * tile, y, tile);
   }
 
-  for (let y = 0; y < rows; y += 1) {
-    for (let x = 0; x < cols; x += 1) {
-      const tileType = state.grid[y][x];
-      drawTile(tileType, ox + x * tile, oy + y * tile, tile, state.cameraUnlocked);
-    }
-  }
+  if (state.ledger.offering) drawLedgerField(ox, y, tile);
+  drawRobot(ox + state.robot.x * tile, y, tile);
 
-  drawRobot(ox + state.robot.x * tile, oy + state.robot.y * tile, tile);
-
-  els.blindOverlay.classList.toggle("hidden", state.cameraUnlocked);
-  els.cameraChip.textContent = state.cameraUnlocked ? "GRAY SENSOR" : "NO SENSOR";
+  els.blindOverlay.classList.toggle("hidden", worldVisible());
+  els.cameraChip.textContent = cultivationUnlocked() ? "AURA BUS" : worldVisible() ? "RAIL BUS" : "NO SENSOR";
 }
 
 function drawNoise(width, height) {
-  for (let i = 0; i < 220; i += 1) {
+  for (let i = 0; i < 180; i += 1) {
     const shade = Math.floor(20 + Math.random() * 38);
     ctx.fillStyle = `rgb(${shade},${shade + 7},${shade + 3})`;
     ctx.fillRect(Math.random() * width, Math.random() * height, 2, 2);
   }
 }
 
-function drawTile(tileType, x, y, tile, visible) {
-  if (!visible) {
-    ctx.strokeStyle = "rgba(120,242,156,0.045)";
-    ctx.strokeRect(x + 0.5, y + 0.5, tile - 1, tile - 1);
-    return;
-  }
-
-  const colors = {
-    "#": "#333b38",
-    ".": "#101614",
-    H: "#7e642a",
-    T: "#2d6a3d",
-  };
-  ctx.fillStyle = colors[tileType] || colors["."];
+function drawTrackCell(index, x, y, tile) {
+  const isStart = index === state.track.start;
+  const hasFragment = state.track.fragments.includes(index);
+  ctx.fillStyle = isStart ? "#243d47" : "#101614";
   ctx.fillRect(x, y, tile, tile);
   ctx.strokeStyle = "rgba(232,255,241,0.08)";
   ctx.strokeRect(x + 0.5, y + 0.5, tile - 1, tile - 1);
 
-  if (tileType === "T") {
+  ctx.strokeStyle = "rgba(114,228,154,0.18)";
+  ctx.beginPath();
+  ctx.moveTo(x + tile * 0.08, y + tile * 0.5);
+  ctx.lineTo(x + tile * 0.92, y + tile * 0.5);
+  ctx.stroke();
+
+  if (hasFragment) {
     ctx.fillStyle = "#90f7a8";
-    ctx.fillRect(x + tile * 0.36, y + tile * 0.2, tile * 0.28, tile * 0.6);
+    ctx.fillRect(x + tile * 0.36, y + tile * 0.35, tile * 0.28, tile * 0.3);
   }
-  if (tileType === "H") {
+
+  if (isStart) {
     ctx.fillStyle = "#ffc857";
-    ctx.fillRect(x + tile * 0.24, y + tile * 0.24, tile * 0.52, tile * 0.52);
+    ctx.fillRect(x + tile * 0.38, y + tile * 0.24, tile * 0.24, tile * 0.52);
   }
+}
+
+function drawLedgerField(ox, oy, tile) {
+  const x = ox + state.track.start * tile + tile / 2;
+  const y = oy + tile / 2;
+  const open = ledgerWindowOpen();
+  ctx.strokeStyle = open ? "#b59cff" : "rgba(181,156,255,0.38)";
+  ctx.lineWidth = open ? 3 : 1;
+  ctx.beginPath();
+  ctx.arc(x, y, tile * (open ? 0.44 : 0.36), 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.lineWidth = 1;
 }
 
 function drawRobot(x, y, tile) {
   const pad = tile * 0.18;
-  ctx.fillStyle = state.cameraUnlocked ? "#74d8ff" : "rgba(116,216,255,0.18)";
+  ctx.fillStyle = worldVisible() ? "#74d8ff" : "rgba(116,216,255,0.18)";
   ctx.fillRect(x + pad, y + pad, tile - pad * 2, tile - pad * 2);
 
   const centerX = x + tile / 2;
   const centerY = y + tile / 2;
-  const dir = DIRS[state.robot.dir];
   ctx.fillStyle = "#f3fff7";
   ctx.beginPath();
-  ctx.moveTo(centerX + dir.dx * tile * 0.32, centerY + dir.dy * tile * 0.32);
-  ctx.lineTo(centerX + dir.dy * tile * 0.18, centerY - dir.dx * tile * 0.18);
-  ctx.lineTo(centerX - dir.dy * tile * 0.18, centerY + dir.dx * tile * 0.18);
+  ctx.moveTo(centerX + state.robot.dir * tile * 0.32, centerY);
+  ctx.lineTo(centerX - state.robot.dir * tile * 0.18, centerY - tile * 0.18);
+  ctx.lineTo(centerX - state.robot.dir * tile * 0.18, centerY + tile * 0.18);
   ctx.closePath();
   ctx.fill();
 }
 
 function renderMetrics() {
   els.tickReadout.textContent = String(state.tick);
-  els.energyReadout.textContent = String(state.energy);
-  els.driftReadout.textContent = driftValue().toExponential(1);
-  els.woodCount.textContent = `木材 ${state.wood} / 3`;
+  els.energyReadout.textContent = String(Math.ceil(state.energy));
+  els.coreReadout.textContent = String(Math.ceil(state.core));
+  els.fiberReadout.textContent = `${state.parts}/3`;
+  els.auraReadout.textContent = formatQi(state.cultivation.qi);
+  els.foundationReadout.textContent = String(state.cultivation.foundation);
+  els.realmReadout.textContent = currentRealm().name;
+  els.epochLabel.textContent = `EPOCH 0x${String(state.epoch + 1).padStart(4, "0")}`;
+  els.epochState.textContent = stageLabel();
+  els.objectiveText.textContent = objectiveText();
+  document.body.classList.toggle("heaven-alert", state.stage === "alert");
+  document.body.classList.toggle("cultivation-unlocked", cultivationUnlocked());
+}
 
-  if (state.halted) {
-    els.epochState.textContent = "纪元中断";
-  } else if (state.cameraUnlocked) {
-    els.epochState.textContent = "感知已越权";
+function renderLedger() {
+  const ledgerVisible =
+    state.stage === "ledger" || state.stage === "alert" || state.ledger.duplicateDetected;
+  els.ledgerPanel.hidden = !ledgerVisible;
+  if (!ledgerVisible) return;
+
+  els.ledgerSample.textContent = state.ledger.offering ? "PRESENT" : "EMPTY";
+  els.ledgerAck.textContent = state.ledger.ack ? "1" : "0";
+  els.ledgerPhase.textContent = ledgerPhaseName();
+  els.heavenAttention.textContent =
+    state.stage === "alert" ? `${Math.ceil(state.heavenAttention)}%` : "0%";
+}
+
+function renderCultivation() {
+  if (!cultivationUnlocked()) return;
+
+  const cultivation = state.cultivation;
+  const target = nextRealm();
+  const breath = breathCost();
+  const foundation = foundationCost();
+  const arrayCost = spiritArrayCost();
+  const arrayRoot = spiritArrayFoundationRequirement();
+  const canBreakthrough =
+    Boolean(target) && cultivation.qi >= target.qi && cultivation.foundation >= target.foundation;
+
+  els.realmChip.textContent = currentRealm().name;
+  els.cultQi.textContent = formatQi(cultivation.qi);
+  els.cultFoundation.textContent = String(cultivation.foundation);
+  els.cultYin.textContent = `${formatQi(yinPerScan())}/扫`;
+  els.cultYang.textContent = `${formatQi(yangPerScan())}/扫`;
+  els.cultAttention.textContent = `${Math.ceil(cultivation.attention)}%`;
+  els.cultNext.textContent = target
+    ? `${target.name} ${formatQi(target.qi)}灵气/${target.foundation}根基`
+    : "未知上境";
+
+  els.drawQiBtn.textContent = `取灵 +${formatQi(
+    1 * (1 + cultivation.yinLevel * 0.18) * realmMultiplier(),
+  )}`;
+  els.breathUpgradeBtn.textContent = `吐纳 ${breath}灵气`;
+  els.foundationBtn.textContent = `固本 ${foundation}灵气`;
+  els.spiritArrayBtn.textContent = `生灵阵 ${arrayCost}灵气/${arrayRoot}根基`;
+  els.breakthroughBtn.textContent = target ? `突破 ${target.name}` : "等待上境";
+
+  els.breathUpgradeBtn.disabled = cultivation.qi < breath;
+  els.foundationBtn.disabled = cultivation.qi < foundation;
+  els.spiritArrayBtn.disabled = cultivation.qi < arrayCost || cultivation.foundation < arrayRoot;
+  els.breakthroughBtn.disabled = !canBreakthrough;
+
+  if (!target) {
+    els.cultivationHint.textContent = "已抵达当前版本可见的最高境界。";
+  } else if (canBreakthrough) {
+    els.cultivationHint.textContent = "灵气与根基已经压到临界，可以尝试突破。";
+  } else if (cultivation.yangLevel > 0) {
+    els.cultivationHint.textContent = "生灵阵正在输出新增灵气，天道注视也在缓慢聚集。";
+  } else if (cultivation.yinLevel > 0) {
+    els.cultivationHint.textContent = "吐纳法形成了第一条稳定的阴性取灵循环。";
   } else {
-    els.epochState.textContent = "纪元稳定";
+    els.cultivationHint.textContent = "残缺机体正在以原始信号校准第一缕灵气。";
   }
-
-  els.objectiveText.textContent = state.cameraUnlocked
-    ? "低像素监控已接入。下一层 Workaround：解析灵气摄像头。"
-    : "盲态伐木，回收 3 份木材，拼出第一只光电传感器。";
 }
 
-function frontCell() {
-  const dir = DIRS[state.robot.dir];
-  return {
-    x: state.robot.x + dir.dx,
-    y: state.robot.y + dir.dy,
+function stageLabel() {
+  const labels = {
+    boot: "S00 核心自检",
+    salvage: "S01 一维轨道",
+    cultivation: "S02 修行炉在线",
+    ledger: "S03 天道结算",
+    alert: "天道正在修补",
+    remap: "S03 I/O 已重映射",
+    complete: "垂直切片完成",
   };
+  if (state.halted) return "纪元中断";
+  return labels[state.stage] || state.stage;
 }
 
-function tileAt(x, y) {
-  if (!state.grid[y] || state.grid[y][x] === undefined) return "#";
-  return state.grid[y][x];
+function objectiveText() {
+  if (state.halted) return "核心或能源已经归零。保留梯形图并重启当前纪元。";
+  const objectives = {
+    boot: "先活下来：观察核心低压输入，并用梯形图维持 Q4 核心脉冲。",
+    salvage: "沿一维轨道移动，拾取 3 枚结构碎片。没有障碍物，只有边界。",
+    cultivation: "修行炉已上线。现在可以开始取灵、固本，并让梯形图辅助自动化。",
+    ledger: "一份样本只应结算一次。观察账本窗口与物理闩锁之间的两个扫描周期。",
+    alert: `漏洞签名已暴露。天道将在 ${state.calamityCountdown ?? 0} 个扫描周期后重写 I/O。`,
+    remap: "旧梯形图仍在，但通道映射已经改变。重新辨认核心低压输入。",
+    complete: "代码、测试思路和故障知识穿过了轮回。第一条系统路径已经闭合。",
+  };
+  return objectives[state.stage] || "等待新的系统目标。";
 }
 
-function atHome() {
-  return state.robot.x === state.home.x && state.robot.y === state.home.y;
+function ledgerPhaseName() {
+  const names = ["CREDIT-A", "CREDIT-B", "LATCH", "COOLDOWN", "COOLDOWN", "ARM"];
+  const phase = ledgerPhaseIndex();
+  return phase < 0 ? "OFFLINE" : names[phase];
 }
 
-function manhattan(a, b) {
-  return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+function showEpochOverlay() {
+  if (!els.epochOverlay) return;
+  els.epochOverlay.classList.add("visible");
+  if (overlayTimer) window.clearTimeout(overlayTimer);
+  overlayTimer = window.setTimeout(() => {
+    els.epochOverlay.classList.remove("visible");
+  }, 2200);
 }
 
-function driftValue() {
-  const t = state.tick * 0.1;
-  return Math.abs(t + 0.2 - t - 0.2) * Math.max(1, state.tick ** 1.25);
+function canMoveForward() {
+  const next = state.robot.x + state.robot.dir;
+  return next >= 0 && next < state.track.length;
+}
+
+function fragmentAtRobot() {
+  return state.track.fragments.includes(state.robot.x);
+}
+
+function atOrigin() {
+  return state.robot.x === state.track.start;
 }
 
 function log(type, text) {
@@ -1318,5 +1120,5 @@ function stopRun() {
     window.clearInterval(runTimer);
     runTimer = null;
   }
-  els.runBtn.textContent = "30 tick";
+  els.runBtn.textContent = "运行 ×30";
 }

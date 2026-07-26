@@ -1,79 +1,178 @@
-# AGENTS.md
+﻿# AGENTS.md
 
-This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
+This file provides guidance to Codex when working with code in this repository.
 
-## Project overview
+Project-level architecture and development decisions live in `ARCHITECTURE.md`. Worldbuilding canon and open setting ideas live in `WORLD.md`, with detailed setting documents under `world/`. Follow these documents when choosing implementation approaches and writing in-game text. Write setting documents and in-game setting prose in Chinese by default.
+
+## Project Overview
 
 Silidox (硅基问道) is a programming-themed browser game. A broken robot traverses a cultivation (修仙) world, using programming to craft and fight. The first unlockable language is **Ladder Diagram** (梯形图 / LD), the graphical language used in PLC industrial control.
 
-The game is pure vanilla JS with ES modules — no frameworks, no build tools, no package.json. Open `index.html` directly or serve the directory with any static file server.
+The current MVP is a pure vanilla browser app: no framework, no build step, and no `package.json`. It is written as classic browser scripts so `index.html` can still be opened directly from disk.
+
+Do not introduce React, Vue, Svelte, Angular, bundlers, transpilers, or runtime package dependencies unless the project explicitly changes its architecture decision in `ARCHITECTURE.md`.
 
 ## Running
 
 ```bash
-# Serve locally (pick one):
 bun index.html
 ```
 
-Then open `http://localhost:3000` in your browser.
+Then open `http://localhost:3000` in a browser.
 
-There are no tests, linting, or build steps.
+You can also open `index.html` directly. Keep this direct-file workflow working unless there is a deliberate decision to move to ES modules or a build step.
 
-## Architecture
+There are no formal tests, linting, or build steps.
+
+The release model is the source repository itself. Do not assume a generated `dist` artifact or deployment build.
+
+## Current Runtime Architecture
 
 ```
-index.html  →  main.js  →  Engine  (engine.js)
-                        →  Screen  (screen.js)
-                        →  IDE     (ide.js → lad.js)
+index.html
+  -> styles.css
+  -> src/data.js
+  -> src/ladder-editor.js
+  -> src/app.js
 ```
 
-### Engine (`engine.js`)
+### `src/data.js`
 
-The game loop runs on a 10ms `setInterval` (100 Hz). It maintains a sliding window of the last 100 ticks to compute a heart rate (`heartCount`). Each tick it:
-1. Reads `HEART` from `this.vars` (set by pointer/touch events on the screen circle)
-2. Evaluates the pulse count and updates the engine DOM text/color
-3. Runs the user's ladder logic program (`this.program`)
-4. Calls `monitor()` to push variable values to the IDE and Screen
+Shared static data:
 
-The user's ladder program is injected via `engine.program = () => { /* user LAD logic compiled to JS */ }`.
+- Input pins: `I0` through `I7`
+- Output coils/actions: `Q0` through `Q4`
+- Cultivation realm thresholds
+- Action priority order
+- One-dimensional rail length, start index, and fragment positions
 
-### Screen (`screen.js`)
+Keep this file side-effect free.
 
-Renders the circular robot "core" display. The circle radius expands based on heart rate. Pointer events (mousedown/up, touchstart/end) on the circle toggle `engine.vars.HEART`.
+### `src/ladder-editor.js`
 
-### IDE (`ide.js`)
+The graphical Ladder Diagram editor and compiler.
 
-Two sections: a **variable table** (name, type, value) and a **ladder diagram editor**.
+Responsibilities:
 
-- `SILVar` — a variable with name, type, value. Has `readonly()` flag. Inline editing via double-click.
-- Ladder rungs (`SILLad`) are rendered as inline SVGs inside draggable divs.
-- Drag-and-drop: drag a shape to the trash bin to delete it; Ctrl+click for multi-select.
-- Variables are monitored in real-time: the `monitor()` method updates displayed values.
+- Load, normalize, migrate, and save ladder programs in `localStorage`
+- Render ladder rungs as inline SVG
+- Support toolbar insertion of rungs, contacts, and coils
+- Support drag-and-drop insertion from the toolbar
+- Support dragging existing contacts to reorder them or move them between rungs
+- Maintain the selected rung/contact/coil
+- Render the contextual pin picker
+- Compile ladder data into runtime rungs
+- Evaluate compiled rungs against sensor values
 
-### LAD (`lad.js`)
+Current ladder data shape:
 
-The Ladder Diagram graphics engine. Class hierarchy:
+```js
+{
+  id: "rung-1",
+  enabled: true,
+  contacts: [{ op: "XIC", pin: "I1" }],
+  coil: "Q2",
+}
+```
 
-- `LADShape` — base class with position, sizing, connectors, and an SVG `<g>` render method
-- `LADNode` — a contact (input section) or coil (output section). Types: `open`, `set`, `rise`, with optional `reverse`. Factory methods: `LADNode.contact(kind)`, `LADNode.coil(kind)`
-- `LADParallel` — a parallel branch (container, not yet rendered)
-- `LADSeries` — a horizontal chain of children. Handles layout (left-to-right positioning) and `fitWidth()` for uniform rung width
-- `SILLad` — a rung (梯级). Extends `LADSeries`, renders as a full SVG with power rails, drag-and-drop support, and a unique `gid` for tree addressing
+Supported contact operations:
 
-Each shape gets a `gid` (dot-separated path like `"0.1"`) that identifies its position in the tree and enables drag-and-drop targeting.
+- `XIC`: normally-open contact
+- `XIO`: normally-closed contact
 
-### Data types (`types.js`)
+Parallel branches are not implemented yet. Track editor roadmap items in `TODO.md`.
 
-PLC-style integer type constants: `INT32_MAX`, `UINT32_MAX`, `INT16_MAX`, `INT8_MAX`, etc.
+### `src/app.js`
 
-### CSS organization
+Main game runtime and world rendering.
 
-- `style.css` — body/font base
-- `screen.css` — cursor style for the core circle
-- `ide.css` — IDE layout, ladder SVG styling, drag target (trash bin), shape selection
+Responsibilities:
 
-## Key patterns
+- Cache DOM references
+- Initialize the ladder editor
+- Create and reset world state
+- Run ticks
+- Read world sensors
+- Apply selected output action to the robot
+- Render sensors, log lines, canvas world, and metrics
+- Wire compile, step, run, and reset controls
 
-- Each component stores a back-reference on its DOM node: `node.controller = this`. This is how `engine.monitor()` reaches the IDE and Screen controllers.
-- Ladder shapes use a builder-pattern fluent API: `LADNode.contact().operandOf("X").reversed()`.
-- The `gid` addressing scheme uses dotted paths (e.g., `"0"`, `"0.1"`, `"0.1.2"`) for tree navigation during drag-and-drop.
+`src/app.js` depends on globals defined by `src/data.js` and `src/ladder-editor.js`, so script order in `index.html` matters.
+
+## Legacy Files
+
+The root-level files below are legacy prototype code and are not loaded by the current `index.html` runtime:
+
+- `main.js`
+- `engine.js`
+- `screen.js`
+- `ide.js`
+- `lad.js`
+- `types.js`
+- `site-nav.js`
+- `SILLad.js`
+- `style.css`, `screen.css`, `ide.css`
+
+Do not assume those files are active just because they exist. If reusing code from them, first verify whether it still matches the current MVP.
+
+## CSS Organization
+
+The active page uses root-level `styles.css`.
+
+Current major sections:
+
+- Global theme and layout
+- Manual panel
+- Ladder editor panel
+- Sensor/log terminal area
+- Canvas world panel
+- Responsive layout
+
+## Worldbuilding Documents
+
+- `WORLD.md`: setting canon, terminology, and open questions
+- `world/faction-cards/`: detailed faction and cultivation-path designs
+- `world/characters.md`: provisional era characters, histories, conflicts, and relationships
+- `world/mortal-societies.md`: mortal ideologies and political systems
+- `world/production-relations.md`: automation, ownership, labor, and later social conflict
+- `world/naming-guide.md`: naming research and project naming rules
+- `world/ai-character-contract.md`: provider-neutral AI role-card and game-state protocol
+- `world/character-prompts/`: model-callable character prompt prototypes
+
+Character and faction names marked as provisional must stay provisional until their regions, families, sect histories, and naming systems are defined. AI character prompts must preserve the direct-file game: online model access is optional, model output is untrusted, and the local game engine validates every action before applying it.
+
+## Key Patterns
+
+- Follow `ARCHITECTURE.md` for platform and release constraints.
+- Follow `WORLD.md` for setting canon, terminology, and open worldbuilding questions.
+- Follow `world/naming-guide.md` before assigning formal character, faction, location, or technique names.
+- Follow `world/ai-character-contract.md` for role-card inputs, outputs, memory, and validation boundaries.
+- Write worldbuilding notes and setting prose in Chinese by default; use English only for technical names, code identifiers, or deliberate contrast.
+- The app intentionally uses classic scripts for direct `index.html` support.
+- `src/data.js` should stay side-effect free.
+- `src/ladder-editor.js` owns ladder data, editing, compiling, and rung evaluation.
+- `src/app.js` owns simulation state and visual world rendering.
+- The ladder editor persists to `localStorage` under `silidox.ladder.v2`.
+- Legacy text programs may be migrated from `silidox.program`.
+- `TODO.md` is the source of truth for near-term implementation tasks.
+
+## Verification
+
+Use the bundled or local Node executable for syntax checks when available:
+
+```bash
+node --check src/data.js
+node --check src/ladder-editor.js
+node --check src/app.js
+git diff --check
+```
+
+For manual verification, run `bun index.html`, open the page, then check:
+
+- Ladder rungs render correctly
+- Contacts and coils are selectable
+- Toolbar click insertion works
+- Toolbar drag insertion works
+- Existing contact drag reordering works
+- Pin picker updates selected contact/coil
+- `1 tick` advances the world
