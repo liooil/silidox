@@ -1,86 +1,137 @@
 # Architecture and Development Guidelines
 
-This document records project-level architecture decisions for Silidox.
+本文记录 Silidox 当前的平台、运行时和发布决策。
 
-## Platform Decision
+## 平台与发布
 
-Silidox should stay a native browser game built with plain HTML, CSS, and JavaScript.
+Silidox 使用原生 HTML、CSS 和 JavaScript。不要引入 React、Vue、Svelte、Angular、打包器、转译器、运行时包依赖或必须存在的 `package.json`。
 
-Use:
-
-- HTML
-- CSS
-- Vanilla JavaScript
-- Browser-native APIs such as DOM, SVG, Canvas, localStorage, and drag-and-drop
-
-Do not introduce:
-
-- React, Vue, Svelte, Angular, or similar UI frameworks
-- Bundlers or build systems
-- Transpilers
-- Runtime package dependencies
-- A required `package.json`
-
-The game should remain understandable as a small source repository that can be inspected and modified directly.
-
-## Run Model
-
-Opening `index.html` should be enough to start playing.
-
-This direct-file workflow is a hard constraint for the current project shape. Serving locally is allowed for convenience:
+直接打开 `index.html` 必须可以游玩。开发时也可以运行：
 
 ```bash
 bun index.html
 ```
 
-But local serving must not become mandatory unless the project explicitly decides to change its platform model.
+源码仓库本身就是发布物，不生成 `dist`，不依赖 CDN，也不要求部署流水线。
 
-## Release Model
+## 当前脚本链
 
-Release the source repository directly.
-
-There is no generated `dist` directory, build artifact, packed app, or deployment pipeline in the current plan. A release should be the checked-in source files plus assets needed by `index.html`.
-
-Implications:
-
-- Keep all runtime code and assets in the repository.
-- Avoid CDN-only dependencies.
-- Avoid generated files that must be rebuilt before playing.
-- Prefer stable relative paths from `index.html`.
-- Keep manual verification simple: open `index.html` or run `bun index.html`.
-
-## Script Model
-
-The current runtime uses classic browser scripts instead of ES modules:
-
-```html
-<script src="./src/data.js"></script>
-<script src="./src/ladder-editor.js"></script>
-<script src="./src/app.js"></script>
+```text
+index.html
+  -> styles.css
+  -> src/data.js
+  -> src/simulation.js
+  -> src/ladder-editor.js
+  -> src/automation-plan.js
+  -> src/ui.js
+  -> src/app.js
 ```
 
-This preserves direct `file://` loading. If the project later considers ES modules, first decide whether losing direct-file compatibility is acceptable.
+所有文件继续使用经典脚本，并通过明确的 `Silidox*` 全局命名空间协作。
 
-## Development Style
+- `src/data.js`：静态资源、轨道、建设、控制器与设备 I/O 定义；不读取存档或 DOM。
+- `src/simulation.js`：确定性的资源、停机、移动、建设、控制与阶段推进；不访问 DOM 或 localStorage。
+- `src/ladder-editor.js`：多设备梯形图存储、迁移、编辑、编译、渲染与求值。
+- `src/automation-plan.js`：把设备程序转换成声明式离线执行计划，不包含可执行 JavaScript。
+- `src/ui.js`：DOM 缓存、事件绑定、工作区和诊断界面渲染。
+- `src/app.js`：启动、固定步长时钟、模块编排、存档和下载。
 
-Prefer small, explicit modules by responsibility:
+## 游戏系统边界
 
-- `src/data.js`: shared static data
-- `src/ladder-editor.js`: Ladder Diagram editing, rendering, compiling, and rung evaluation
-- `src/app.js`: game loop, world simulation, and screen rendering
-- `styles.css`: active page styling
+游戏使用一个共享增量底盘连接多个独立工作区：
 
-Cultivation thresholds, I/O identifiers, output actions, and rail/world templates should stay in
-`src/data.js` when they are static shared data.
+- 内景修炼：形骸模块、灵流拓扑、周天时序、功法模式与故障保护。
+- 外部环境：探索、移动、采集与世界事件。
+- 工坊工业：加工、运输、设备和外部工业控制。
+- 阵法：取灵、生灵、结算与天道风险。
+- 专业工艺：炼丹等跨生产链系统。
 
-Use browser-native structures before inventing abstractions. Add abstractions only when they reduce real complexity or keep feature work local.
+能源、材料、灵气、设备产能和时间可以跨系统流动，但每个系统可以使用适合自身的编辑器。梯形图是第一种设备控制语言，不是所有玩法的统一界面。
 
-## Compatibility Expectations
+## 共享模拟与控制语义
 
-When changing runtime architecture, preserve:
+Silidox 不分别实现互不相干的修炼、工厂、战斗和争霸运行时。它们共享三个底层能力：
 
-- Direct `index.html` playability
-- No build step
-- No framework dependency
-- Source-repository release model
-- Clear file boundaries
+1. 确定性的世界模拟，包括时间、资源、事件、实体状态和因果顺序；
+2. 声明式自动化运行时，包括信号、条件、状态、计时器、优先级和受限输出；
+3. 成长与知识资产，包括功法模块、设备程序、蓝图、策略和轮回继承。
+
+共享运行时不要求玩家在所有系统中使用相同界面。梯形图、经脉拓扑、战斗状态机和政令规则可以编译到相同的控制语义，但必须保留符合各自领域的交互方式。
+
+当前只实现真实玩法需要的最小原语，不预先建设完整通用编程平台。新的控制原语应先由具体玩法证明价值，再加入共享中间表示；境界和设备权限决定程序可以使用哪些原语。
+
+领域系统只提交受约束的资源请求、状态变化和控制命令，不能直接任意修改其他领域的数据。跨领域联动通过明确端口、事件和所有权规则发生，例如战斗向内景请求瞬时灵力，内景根据模式与优先级决定是否供给。
+
+## 内景运行边界
+
+内景的详细设定和第一版范围见 [world/inner-landscape.md](world/inner-landscape.md)。实现时至少分开以下数据：
+
+- model：主角当前相信的节点类型、参数和可见属性；
+- body：固定锚点、已安装模块、通道和物理损伤；
+- runtime：当前流量、灵压、储量、温度、杂质和运行模式；
+- observations：传感器实际获得且可能不完整的记录；
+- techniques：功法拓扑、周天流程、控制参数、兼容要求和版本；
+- daoMarks：已通过稳定性验证并封装的模块及验证记录。
+
+世界真实参数与主角当前模型必须分开。模拟内核保留真实状态，界面和控制程序只能读取当前传感、研究和境界允许主角知道的部分。模型升级可以揭示新属性或修正旧解释，但不应悄然重写已经发生的历史观测。
+
+内景继续使用全局 250ms 固定步长。每步按照固定顺序执行：
+
+1. 采样当前节点、外界和负载输入；
+2. 运行神意层控制并产生声明式命令；
+3. 按显式优先级解决冲突并校验资源与权限；
+4. 应用阀门、分流、功率和模式命令；
+5. 推进灵流、储量、温度、杂质和损伤；
+6. 检测故障、周天完成与稳定性条件；
+7. 发出事件并保存下一步状态。
+
+第一版只模拟流量、灵压、纯度、杂质、温度和稳定度，并只实现过压、过热、污染和振荡四类可解释故障。突破不使用隐藏概率；同一初始状态和命令序列必须得到同一故障与结果。
+
+神意层和保存的功法只能包含声明式控制结构，不能携带任意 JavaScript。第一版允许信号读取、阈值、计时器、状态、优先级、模式切换、安全停机和有限输出；模块调用、并行、中断、预测和分布式控制在玩法与境界需要时再扩展。
+
+## 时间与存档
+
+- 在线模拟使用 `250ms` 固定步长。
+- 页面重新打开时不按关闭时长补算资源；没有本地执行器就没有离线收益。
+- 新存档使用 `silidox.save.v2`。
+- 多设备程序使用 `silidox.ladder.v3`。
+- 旧 `silidox.meta.v1` 与 `silidox.ladder.v2` 保持原样，并复制到新版只读纪元档案。
+
+存档迁移必须保留旧键，不允许为了迁移而删除玩家的原始数据。
+
+长期持久化需要区分三类内容：
+
+- 世界状态：当前周目的资源、实体、地图、人物关系和剧情进度；
+- 知识资产：功法模块、自动化程序、工厂蓝图、战斗策略和已发现法则；
+- 历史记录：重放、调试、统计、剧情回顾、成就和轮回结算所需事件。
+
+程序、功法和蓝图是玩家作品，应当拥有独立身份、版本、依赖和兼容要求；世界存档保存的是它们在某一周目中的实例和运行状态。具体存储键与迁移版本在开始实现内景存档时确定，不在文档阶段提前占用版本号。
+
+## 模拟精度与注意力压缩
+
+后期对象数量扩大后，系统按玩家注意力和成熟度降低模拟精度：
+
+- 活跃对象：玩家正在观察、编辑或直接交互，保持完整模拟；
+- 自动化对象：已经配置完成，仍按固定步长运行控制和资源结算；
+- 汇总对象：成熟系统只保存产能、库存变化、维护成本和风险等聚合状态；
+- 历史对象：完成的前世、工厂或文明凝结为知识与道果，不继续实时模拟。
+
+从高精度降为汇总状态必须通过显式封装和验证，不能因为对象离开屏幕就改变结果。道痕、设备模块和制度化委任都是玩家获得降级模拟资格的玩法机制。
+
+## 自动化与本地执行器
+
+基础设备可以使用低效预设控制，不要求玩家编程。梯形图用于降低扫描成本、能源消耗，或建立跨信号联动。
+
+`silidox.automation-plan.v1` 是浏览器与未来本地执行器之间的稳定声明式边界。计划只描述设备、梯形图 IR、扫描间隔、成本和物理限制，不能携带任意脚本。
+
+未来的可选执行器优先使用 Bun，也可以使用能稳定执行 WASM 的运行时。它只监听回环地址，通过配对令牌接收计划，并按游标返回一次性结果。真实 CPU 性能影响可维持的控制扫描量和并发生产线，但设备物理周期、能源和材料仍限制产量。完整约定见 `LOCAL_RUNNER_PROTOCOL.md`。
+
+## 兼容性要求
+
+架构调整必须继续满足：
+
+- 直接打开 `index.html`
+- 无构建步骤、无框架依赖
+- 源码仓库直接发布
+- 浏览器端无本地执行器时仍可完整在线游玩
+- 模拟逻辑可在无 DOM 的 Node 环境中测试

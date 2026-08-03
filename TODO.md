@@ -1,31 +1,84 @@
 # TODO
 
-## Playable vertical slice
+## 前八分钟增量开局
 
-- [x] Add an independent core-pulse survival loop.
-- [x] Replace semantic navigation inputs with raw contact and material signals.
-- [x] Unlock visual perception through automated salvage.
-- [x] Add a two-scan Heaven ledger invariant that can be exploited through ladder logic.
-- [x] Trigger a Heaven patch and reincarnation after duplicate settlement.
-- [x] Preserve ladder code while remapping the input bus in the next epoch.
-- [x] Add a full-reset command for replaying the slice.
-- [ ] Add contract tests that can validate modules across I/O remaps.
-- [ ] Add a second valid exploit strategy with a different cost profile.
+- [x] 默认使用 250ms 固定步长持续运行，并提供暂停。
+- [x] 以三次手动核心脉冲解锁环境工作区。
+- [x] 核心归零后进入可恢复停机，不清空资源或建设进度。
+- [x] 保留无障碍一维移动、掉头和即时拾取。
+- [x] 将开局资源改为持续存在的能源与材料。
+- [x] 为心跳、移动和拾取提供不要求编程的低效预设控制器。
+- [x] 让设备梯形图降低扫描负载与能源消耗。
+- [x] 增加维修台、热差发电器和频谱传感器建设任务。
+- [x] 以三次残阵采样结束当前切片，不提前解锁修行。
+- [x] 将机体、环境、工坊和未知阵法拆为渐进解锁工作区。
+- [ ] 通过多轮试玩把主动玩家抵达残阵证据的时间调到 6–10 分钟。
 
 ## Code organization
 
-- [x] Split shared data and the Ladder editor out of `src/app.js`.
-- [x] Document native browser platform and source-repository release constraints.
+- [x] 将静态数据、确定性模拟、梯形图、自动化计划、UI 和启动编排拆分。
+- [x] 保持经典脚本、直接打开 `index.html` 和源码仓库发布。
+- [x] 增加无依赖模拟测试。
+- [x] 使用 `silidox.save.v2`，并将旧版进度复制到只读纪元档案。
+- [x] 使用 `silidox.ladder.v3` 保存多设备程序，并保留旧 v2 键。
+- [x] 定义 `silidox.automation-plan.v1` 与可选本地执行器边界。
 
-## Incremental cultivation core
+## 后续增量系统
 
-- [x] Add the first cultivation panel: qi, foundation, realm, yin extraction, yang generation, and Heaven attention.
-- [x] Add manual actions for extraction, breath-method improvement, foundation consolidation, spirit generation array setup, and breakthrough.
-- [x] Let ladder outputs assist cultivation automation without making programming mandatory for the earliest loop.
-- [x] Persist cultivation progress across local reboots.
-- [x] Hide cultivation UI until the machine has survived the opening phase and restored a low-level aura interface.
-- [x] Replace the early 2D movement and tree-cutting survival loop with 1D obstacle-free movement and pickup.
-- [x] Remove the early base-return step; fragments now count immediately when picked up.
+- [ ] 扩展工坊到稳定采集、加工、储存和运输，形成 40–60 分钟物理生存章节。
+- [ ] 设计取得本地功法与改造灵气接口的具体契机。
+- [ ] 在正式修行后重新加入取灵、固本、生灵、境界与天道注视。
+- [x] 确立内景为形骸、灵流与神意共同构成的可运行自我模型。
+- [ ] 设计外部工业控制、阵法和炼丹等独立工作区。
+- [ ] 实现 Bun/WASM 本地执行器、配对、CPU 分配与结果游标。
+- [ ] 让真实 CPU 控制吞吐影响并发生产线，但不突破设备物理产能。
+- [ ] 重新引入天道账本、补丁和轮回，并让多设备程序跨纪元保留。
+
+## 内景修炼纵向切片
+
+设计基线见 [world/inner-landscape.md](world/inner-landscape.md)。本节按照“残阵证据之后，无根到筑基”的实现依赖排序；它不会改变当前八分钟开局的范围。
+
+### 研究与数据
+
+- [ ] 确定第一份本地功法知识、灵性材料及其人物或势力来源。
+- [ ] 定义世界真实灵气参数与主角当前模型之间的隔离接口。
+- [ ] 定义 model、body、runtime、observations、techniques 和 daoMarks 数据结构。
+- [ ] 为内景状态加入新存档迁移，并保持旧存档键与纪元档案不被破坏。
+- [ ] 让残阵后续研究逐步揭示未知属性，不立即显示完整灵气面板。
+
+### 确定性模拟
+
+- [ ] 实现十类第一版节点：外界灵场、灵触、灵导通道、滤障、缓冲、炼化、人工丹田、阀门／分流、泄压和排异。
+- [ ] 在 250ms 固定步长中推进流量、灵压、纯度、杂质、温度和稳定度。
+- [ ] 实现过压、过热、污染和振荡四类可观测故障。
+- [ ] 固定“采样、控制、冲突处理、应用命令、流动、故障、事件”的单步顺序。
+- [ ] 增加确定性重放和无 DOM 模拟测试。
+
+### 内景编辑器
+
+- [ ] 新增独立内景工作区，并在灵触完成前保持隐藏。
+- [ ] 使用少量固定锚点和自由拓扑，支持安装、连接、拆除、启停和参数调整。
+- [ ] 同时显示灵流方向、节点状态、警告和选中对象详情。
+- [ ] 实现周天时序与条件式反馈，不复刻梯形图界面。
+- [ ] 在桌面和移动端验证拓扑操作、缩放、滚动和文字布局。
+
+### 《无根吐纳法·零式》
+
+- [ ] 实现第一次低功率引灵，以及过热、杂质和控制干扰。
+- [ ] 要求玩家手动完成三个周天，再连续稳定运行三十个周天。
+- [ ] 增加一次可复现的灵场波动验收，不使用隐藏成功率。
+- [ ] 形成第一道道痕，把稳定回路封装为后台功法模块。
+- [ ] 验证道痕减少操作和神识占用，但不提供无执行器离线收益。
+- [ ] 验证取灵只能承担部分机体负载，不能替代材料、维修、散热和物理生产。
+
+### 模式、战斗与筑基
+
+- [ ] 实现静修、战备、爆发和安全恢复四种首批运行模式及切换代价。
+- [ ] 让外部工坊制造过滤、灵导、缓冲和修复部件。
+- [ ] 接入一次战斗级瞬时负载，验证灵力优先级和备用通道。
+- [ ] 实现灵气波动、战斗负载、通道堵塞和杂质冲击四项筑基压力测试。
+- [ ] 让筑基失败产生跳闸、模块损伤和完整故障记录，而非清空进度。
+- [ ] 筑基成功后解锁反馈控制、故障隔离、功法模块化和可靠后台修炼。
 
 ## Worldbuilding
 
@@ -34,13 +87,15 @@
 - [x] 建立第二张流派卡：蓄能剑修与内外门体系。
 - [x] 建立第三张流派卡：舍弃根基、反复突破的逐境门。
 - [x] 建立第四张流派卡：围剿后仍抽取人魂、后来转向养鸡的牧魂门。
-- [x] 建立第五张流派卡：作为正道魁首与修行基准的太衡宗。
-- [x] 建立初始敌对流派卡：奉行人类至上并持续追杀主角的靖异门。
+- [x] 建立第五张流派卡：作为正道魁首与修行基准的太一宗。
+- [x] 以衡朝天衡司重构前期压力，改由调查、定类与处置推动身份矛盾。
+- [x] 明确衡朝与太一宗之间依附与庇护的制度关系。
+- [x] 明确天衡司结构（仙门外派弟子与凡人司员）与四项职责。
 - [x] 为石胎门、藏锋宗和逐境门生成并接入印象图。
 - [ ] 为牧魂门生成并接入围剿后初遇阶段的印象图。
-- [ ] 为太衡宗生成并接入正统山门印象图。
-- [ ] 为靖异门生成并接入追猎主角的印象图。
-- [ ] 确定正道魁首与初始追杀宗门的正式名称及根本功法名。
+- [ ] 为太一宗生成并接入正统山门印象图。
+- [ ] 为衡朝天衡司生成并接入办案印象图。
+- [ ] 确定太一宗根本功法的正式名称。
 - [x] 明确门派缺陷向主角工程问题转换，并以石胎门建立首个“学习、移植、反哺”闭环。
 - [x] 明确藏锋宗的控制、预测难题与合击调度反哺方向。
 - [x] 明确牧魂门初遇时仍抽取人魂，并由主角推动养鸡转型。
@@ -53,7 +108,7 @@
 - [ ] 建立主要地区、家族与宗门的命名谱系，并替换当前人物和宗门暂名。
 - [x] 明确逐境门的增量重修程序，以及通过重复构筑夯实根基的反哺方向。
 - [x] 确立仙凡双轨、权力不对称、经济互赖与地区制度多样的社会基准。
-- [x] 设计守土朝、百年律国、百工城盟等首批凡人意识形态与政治体制。
+- [x] 设计衡朝、百年律国、百工城盟等首批凡人意识形态与政治体制。
 - [ ] 为凡人政治体制确定正式国名、地理位置、历史关系与当前冲突。
 - [ ] 把程序公开、阵法所有权、产物分配与自动化替代转化为可玩的长期选择。
 - [ ] 设计主角获得社会承认的中期转折，以及后期武装斗争的势力、设施与胜负条件。
@@ -63,11 +118,6 @@
 ## AI characters
 
 - [x] 定义稳定角色核心、转生变量和局内状态三层角色协议。
-- [x] 保存首张靖异门追猎者角色 Prompt 原型。
-- [ ] 在人物正式命名后，为其余时代人物建立可调用角色卡。
-- [ ] 设计不破坏直接打开模式的供应商无关模型调用边界与确定性回退。
-- [ ] 实现模型 JSON 校验、非法行动拒绝、关系结算和持久记忆。
-- [ ] 验证不同 `incarnation_profile` 能改变角色方法而不覆盖稳定人格。
 
 ## Ladder editor
 

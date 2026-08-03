@@ -1,5 +1,11 @@
-// Graphical Ladder Diagram editor and runtime compiler.
-const LADDER_STORAGE_KEY = "silidox.ladder.v2";
+// Graphical Ladder Diagram editor, contextual program store, and runtime compiler.
+(function defineSilidoxLadder(global) {
+const {
+  CONTROL_CONTEXTS,
+  LADDER_STORAGE_KEY,
+  LEGACY_LADDER_STORAGE_KEY,
+  LOGIC_CONSTANTS,
+} = global.SilidoxData;
 
 const LAD_DIMENSIONS = {
   leftRail: 8,
@@ -12,19 +18,30 @@ const LAD_DIMENSIONS = {
 };
 
 let nextRungId = 1;
+let ladderEls = null;
+let editorOptions = {};
+let programStore = null;
+let currentProgramId = "body.heart";
 let ladder = [];
 let selectedNode = null;
 let compiled = { ok: false, rungs: [], diagnostics: [] };
 let activeDraggedTool = "";
 let activeDraggedContact = null;
 
-function initLadderEditor() {
-  ladder = loadLadder();
+function initLadderEditor(elements, options = {}) {
+  ladderEls = elements;
+  editorOptions = options;
+  programStore = loadProgramStore();
+  currentProgramId = CONTROL_CONTEXTS[options.programId]
+    ? options.programId
+    : "body.heart";
+  ladder = programStore.programs[currentProgramId];
   syncNextRungId(ladder);
   selectedNode = firstSelectable(ladder);
   compiled = compileLadder(ladder);
   populateInspectorOptions();
   wireEditorEvents();
+  renderEditor(currentSignals());
 }
 
 function createDefaultLadder() {
@@ -33,18 +50,21 @@ function createDefaultLadder() {
 
 function createRung(
   contacts = [{ op: "XIC", pin: "I0" }],
-  coil = "Q4",
+  coil = null,
   id = allocateRungId(),
   enabled = true,
+  programId = currentProgramId,
 ) {
+  const fallbackInput = inputIds(programId)[0] ?? "I0";
+  const fallbackOutput = outputIds(programId)[0] ?? "Q0";
   return {
     id,
     enabled: enabled !== false,
     contacts: contacts.map((contact) => ({
       op: contact.op === "XIO" ? "XIO" : "XIC",
-      pin: isKnownPin(contact.pin) ? contact.pin : "I0",
+      pin: isKnownPin(contact.pin, programId) ? String(contact.pin) : fallbackInput,
     })),
-    coil: OUTPUTS[coil] ? coil : "Q4",
+    coil: isKnownCoil(coil, programId) ? coil : fallbackOutput,
   };
 }
 
@@ -62,30 +82,75 @@ function syncNextRungId(program) {
   nextRungId = Math.max(nextRungId, highest + 1);
 }
 
-function loadLadder() {
+function createDefaultProgramStore() {
+  return {
+    version: 3,
+    programs: Object.fromEntries(
+      Object.keys(CONTROL_CONTEXTS).map((programId) => [programId, createDefaultLadder()]),
+    ),
+    archive: {},
+  };
+}
+
+function loadProgramStore() {
   const stored = localStorage.getItem(LADDER_STORAGE_KEY);
+  const legacy = localStorage.getItem(LEGACY_LADDER_STORAGE_KEY);
+  const store = createProgramStoreFromRaw(stored, legacy);
+  if (!stored) localStorage.setItem(LADDER_STORAGE_KEY, JSON.stringify(store));
+  return store;
+}
+
+function createProgramStoreFromRaw(stored, legacy) {
+  const fallback = createDefaultProgramStore();
   if (stored) {
     try {
-      return normalizeLadder(JSON.parse(stored));
+      const value = JSON.parse(stored);
+      if (value?.version === 3 && value.programs && typeof value.programs === "object") {
+        for (const programId of Object.keys(CONTROL_CONTEXTS)) {
+          fallback.programs[programId] = normalizeLadder(
+            value.programs[programId],
+            programId,
+          );
+        }
+        fallback.archive =
+          value.archive && typeof value.archive === "object" ? value.archive : {};
+        return fallback;
+      }
     } catch {
-      localStorage.removeItem(LADDER_STORAGE_KEY);
+      return fallback;
     }
   }
 
-  return createDefaultLadder();
+  if (legacy) {
+    try {
+      fallback.archive.legacyV2 = JSON.parse(legacy);
+    } catch {
+      fallback.archive.legacyV2Raw = legacy;
+    }
+  }
+  return fallback;
 }
 
-function normalizeLadder(value) {
+function normalizeLadder(value, programId = currentProgramId) {
   if (!Array.isArray(value)) return createDefaultLadder();
   return value
     .map((rung) =>
-      createRung(rung.contacts, rung.coil, rung.id || allocateRungId(), rung.enabled),
+      createRung(
+        Array.isArray(rung.contacts) && rung.contacts.length > 0
+          ? rung.contacts
+          : [{ op: "XIC", pin: inputIds(programId)[0] ?? "I0" }],
+        rung.coil,
+        rung.id || allocateRungId(),
+        rung.enabled,
+        programId,
+      ),
     )
     .filter((rung) => rung.contacts.length > 0);
 }
 
 function saveLadder() {
-  localStorage.setItem(LADDER_STORAGE_KEY, JSON.stringify(ladder));
+  programStore.programs[currentProgramId] = ladder;
+  localStorage.setItem(LADDER_STORAGE_KEY, JSON.stringify(programStore));
 }
 
 function firstSelectable(program) {
@@ -95,32 +160,35 @@ function firstSelectable(program) {
 }
 
 function populateInspectorOptions() {
+  ladderEls.pinSelect.innerHTML = "";
+  ladderEls.coilSelect.innerHTML = "";
   for (const [pin, name] of currentInputEntries()) {
     const option = document.createElement("option");
     option.value = pin;
     option.textContent = `${pin} ${name}`;
-    els.pinSelect.appendChild(option);
+    ladderEls.pinSelect.appendChild(option);
   }
 
-  for (const pin of Object.keys(OUTPUTS)) {
+  for (const output of currentContext().outputs) {
     const option = document.createElement("option");
-    option.value = pin;
-    option.textContent = `${pin} ${outputSignalLabel(pin)}`;
-    els.coilSelect.appendChild(option);
+    option.value = output.id;
+    option.textContent = `${output.id} ${output.name}`;
+    ladderEls.coilSelect.appendChild(option);
   }
 }
 
 function currentInputEntries() {
   return [
-    ...PIN_IDS.map((pin) => [pin, inputSignalLabel(pin)]),
-    ...Object.entries(LOGIC_CONSTANTS).map(([pin, constant]) => [pin, constant.zh]),
+    ...currentContext().inputs.map((input) => [input.id, input.name]),
+    ...Object.entries(LOGIC_CONSTANTS).map(([pin, constant]) => [pin, constant.name]),
   ];
 }
 
 function refreshInputOptionLabels() {
-  for (const option of els.pinSelect.options) {
+  for (const option of ladderEls.pinSelect.options) {
     const constant = LOGIC_CONSTANTS[option.value];
-    const label = constant ? constant.zh : inputSignalLabel(option.value);
+    const input = currentContext().inputs.find((item) => item.id === option.value);
+    const label = constant ? constant.name : input?.name ?? "未知输入";
     option.textContent = `${option.value} ${label}`;
   }
 }
@@ -128,12 +196,12 @@ function refreshInputOptionLabels() {
 
 function wireEditorEvents() {
   const toolButtons = [
-    [els.addRungBtn, "rung"],
-    [els.addOpenContactBtn, "contact-open"],
-    [els.addClosedContactBtn, "contact-closed"],
-    [els.deleteNodeBtn, "delete"],
-    [els.moveLeftBtn, "move-left"],
-    [els.moveRightBtn, "move-right"],
+    [ladderEls.addRungBtn, "rung"],
+    [ladderEls.addOpenContactBtn, "contact-open"],
+    [ladderEls.addClosedContactBtn, "contact-closed"],
+    [ladderEls.deleteNodeBtn, "delete"],
+    [ladderEls.moveLeftBtn, "move-left"],
+    [ladderEls.moveRightBtn, "move-right"],
   ];
 
   for (const [button, tool] of toolButtons) {
@@ -153,46 +221,46 @@ function wireEditorEvents() {
     }
   }
 
-  els.rungList.addEventListener("dragover", (event) => {
+  ladderEls.rungList.addEventListener("dragover", (event) => {
     if (!event.target.closest(".rung-row") && isToolDrag(event)) {
       event.preventDefault();
-      els.rungList.classList.add("drop-target");
+      ladderEls.rungList.classList.add("drop-target");
     }
   });
 
-  els.rungList.addEventListener("dragleave", (event) => {
-    if (!els.rungList.contains(event.relatedTarget)) {
-      els.rungList.classList.remove("drop-target");
+  ladderEls.rungList.addEventListener("dragleave", (event) => {
+    if (!ladderEls.rungList.contains(event.relatedTarget)) {
+      ladderEls.rungList.classList.remove("drop-target");
     }
   });
 
-  els.rungList.addEventListener("drop", (event) => {
+  ladderEls.rungList.addEventListener("drop", (event) => {
     const tool = draggedTool(event);
-    els.rungList.classList.remove("drop-target");
+    ladderEls.rungList.classList.remove("drop-target");
     clearDragState();
     if (!tool || event.target.closest(".rung-row")) return;
     event.preventDefault();
     applyTool(tool);
   });
 
-  els.contactOpSelect.addEventListener("change", () => {
+  ladderEls.contactOpSelect.addEventListener("change", () => {
     const context = ensureSelection();
     if (!context || selectedNode.type !== "contact") return;
-    context.rung.contacts[selectedNode.index].op = els.contactOpSelect.value;
+    context.rung.contacts[selectedNode.index].op = ladderEls.contactOpSelect.value;
     onLadderChanged();
   });
 
-  els.pinSelect.addEventListener("change", () => {
+  ladderEls.pinSelect.addEventListener("change", () => {
     const context = ensureSelection();
     if (!context || selectedNode.type !== "contact") return;
-    context.rung.contacts[selectedNode.index].pin = els.pinSelect.value;
+    context.rung.contacts[selectedNode.index].pin = ladderEls.pinSelect.value;
     onLadderChanged();
   });
 
-  els.coilSelect.addEventListener("change", () => {
+  ladderEls.coilSelect.addEventListener("change", () => {
     const context = ensureSelection();
     if (!context || selectedNode.type !== "coil") return;
-    context.rung.coil = els.coilSelect.value;
+    context.rung.coil = ladderEls.coilSelect.value;
     onLadderChanged();
   });
 }
@@ -389,21 +457,17 @@ function ensureSelectionForRung(rungId) {
 function onLadderChanged() {
   saveLadder();
   compiled = compileLadder(ladder);
-  render();
+  renderEditor(currentSignals());
+  editorOptions.onChange?.(currentProgramId, exportPrograms());
 }
 
 function compileAndReport() {
   compiled = compileLadder(ladder);
-  if (compiled.ok) return true;
-
-  for (const diagnostic of compiled.diagnostics) {
-    log("bad", diagnostic);
-  }
-  render();
-  return false;
+  renderEditor(currentSignals());
+  return compiled;
 }
 
-function compileLadder(program) {
+function compileLadder(program, programId = currentProgramId) {
   const rungs = [];
   const diagnostics = [];
 
@@ -423,14 +487,14 @@ function compileLadder(program) {
         diagnostics.push(`R${lineNo}: unknown contact ${contact.op}`);
         continue;
       }
-      if (!isKnownPin(contact.pin)) {
+      if (!isKnownPin(contact.pin, programId)) {
         diagnostics.push(`R${lineNo}: unknown input ${contact.pin}`);
         continue;
       }
       contacts.push({ op: contact.op, pin: contact.pin });
     }
 
-    if (!OUTPUTS[rung.coil]) {
+    if (!isKnownCoil(rung.coil, programId)) {
       diagnostics.push(`R${lineNo}: unknown coil ${rung.coil}`);
     }
 
@@ -442,14 +506,17 @@ function compileLadder(program) {
   return { ok: diagnostics.length === 0, rungs, diagnostics };
 }
 
-function isKnownPin(pin) {
-  return PIN_IDS.includes(pin) || Object.hasOwn(LOGIC_CONSTANTS, pin);
+function isKnownPin(pin, programId = currentProgramId) {
+  return inputIds(programId).includes(String(pin)) || Object.hasOwn(LOGIC_CONSTANTS, pin);
 }
 
+function isKnownCoil(coil, programId = currentProgramId) {
+  return outputIds(programId).includes(coil);
+}
 
-function evaluateRungs(sensors) {
+function evaluateRungs(sensors, compiledProgram = compiled) {
   const active = [];
-  for (const rung of compiled.rungs) {
+  for (const rung of compiledProgram.rungs) {
     if (isRungEnergized(rung, sensors) && !active.includes(rung.coil)) {
       active.push(rung.coil);
     }
@@ -469,7 +536,15 @@ function renderEditor(sensors) {
   if (ladder.length > 0) ensureSelection();
   refreshInputOptionLabels();
   updateInspector();
-  els.rungList.innerHTML = "";
+  ladderEls.rungList.innerHTML = "";
+
+  if (ladder.length === 0) {
+    const empty = ladderEls.rungList.appendChild(document.createElement("div"));
+    empty.className = "lad-empty";
+    empty.innerHTML =
+      "<strong>尚未接管</strong><span>添加梯级，或把触点拖入此处开始编写控制程序。</span>";
+    return;
+  }
 
   const width = ladder.reduce((max, rung) => Math.max(max, diagramWidth(rung)), 360);
   const energized = new Set(
@@ -489,7 +564,7 @@ function diagramWidth(rung) {
 }
 
 function renderRungRow({ rung, index, width }, energized) {
-  const row = els.rungList.appendChild(document.createElement("article"));
+  const row = ladderEls.rungList.appendChild(document.createElement("article"));
   row.className = "rung-row";
   row.classList.toggle("energized", energized);
   row.classList.toggle("selected", selectedNode?.rungId === rung.id);
@@ -500,7 +575,7 @@ function renderRungRow({ rung, index, width }, energized) {
   header.className = "rung-row-header";
   header.addEventListener("click", () => {
     selectedNode = { rungId: rung.id, type: "rung" };
-    renderEditor(readSensors());
+    renderEditor(currentSignals());
   });
 
   const title = header.appendChild(document.createElement("strong"));
@@ -555,7 +630,7 @@ function renderRungRow({ rung, index, width }, energized) {
     const shape = event.target.closest("g.shape");
     if (!shape) {
       selectedNode = { rungId: rung.id, type: "rung" };
-      renderEditor(readSensors());
+      renderEditor(currentSignals());
       return;
     }
 
@@ -567,7 +642,7 @@ function renderRungRow({ rung, index, width }, energized) {
     } else {
       selectedNode = { rungId: rung.id, type: "rung" };
     }
-    renderEditor(readSensors());
+    renderEditor(currentSignals());
   });
 
   row.addEventListener("dragover", (event) => {
@@ -753,22 +828,104 @@ function updateInspector() {
   const isCoil = Boolean(context && selectedNode?.type === "coil");
   const isRung = Boolean(context && selectedNode?.type === "rung");
 
-  els.contactOpSelect.disabled = !isContact;
-  els.pinSelect.disabled = !isContact;
-  els.coilSelect.disabled = !isCoil;
-  els.deleteNodeBtn.disabled =
+  ladderEls.contactOpSelect.disabled = !isContact;
+  ladderEls.pinSelect.disabled = !isContact;
+  ladderEls.coilSelect.disabled = !isCoil;
+  ladderEls.deleteNodeBtn.disabled =
     !(isContact && context?.rung.contacts.length > 1) && !(isRung && ladder.length > 1);
-  els.moveLeftBtn.disabled = !isContact || selectedNode.index <= 0;
-  els.moveRightBtn.disabled =
+  ladderEls.moveLeftBtn.disabled = !isContact || selectedNode.index <= 0;
+  ladderEls.moveRightBtn.disabled =
     !isContact || selectedNode.index >= context.rung.contacts.length - 1;
 
   if (isContact) {
     const contact = context.rung.contacts[selectedNode.index];
-    els.contactOpSelect.value = contact.op;
-    els.pinSelect.value = contact.pin;
+    ladderEls.contactOpSelect.value = contact.op;
+    ladderEls.pinSelect.value = contact.pin;
   }
 
   if (isCoil) {
-    els.coilSelect.value = context.rung.coil;
+    ladderEls.coilSelect.value = context.rung.coil;
   }
 }
+
+function currentContext() {
+  return CONTROL_CONTEXTS[currentProgramId] ?? CONTROL_CONTEXTS["body.heart"];
+}
+
+function inputIds(programId = currentProgramId) {
+  return (CONTROL_CONTEXTS[programId]?.inputs ?? []).map((input) => input.id);
+}
+
+function outputIds(programId = currentProgramId) {
+  return (CONTROL_CONTEXTS[programId]?.outputs ?? []).map((output) => output.id);
+}
+
+function currentSignals() {
+  const signals = editorOptions.getSignals?.(currentProgramId);
+  return signals && typeof signals === "object"
+    ? signals
+    : { 0: false, 1: true };
+}
+
+function selectProgram(programId) {
+  if (!CONTROL_CONTEXTS[programId] || programId === currentProgramId) return;
+  saveLadder();
+  currentProgramId = programId;
+  ladder = programStore.programs[programId] ?? createDefaultLadder();
+  programStore.programs[programId] = ladder;
+  syncNextRungId(ladder);
+  selectedNode = firstSelectable(ladder);
+  compiled = compileLadder(ladder);
+  populateInspectorOptions();
+  renderEditor(currentSignals());
+}
+
+function evaluateProgram(programId, sensors) {
+  const program = programStore?.programs?.[programId] ?? [];
+  const compiledProgram = compileLadder(program, programId);
+  return {
+    ok: compiledProgram.ok,
+    diagnostics: [...compiledProgram.diagnostics],
+    outputs: compiledProgram.ok ? evaluateRungs(sensors, compiledProgram) : [],
+    scanCost: compiledProgram.ok ? programScanCost(program) : 0,
+  };
+}
+
+function programScanCost(program) {
+  return program.reduce((total, rung) => {
+    if (rung.enabled === false) return total;
+    return total + 1 + rung.contacts.length;
+  }, 0);
+}
+
+function programReady(programId) {
+  const program = programStore?.programs?.[programId] ?? [];
+  const result = compileLadder(program, programId);
+  return result.ok && result.rungs.length > 0;
+}
+
+function exportPrograms() {
+  return JSON.parse(JSON.stringify(programStore?.programs ?? {}));
+}
+
+function getProgramStore() {
+  return JSON.parse(JSON.stringify(programStore ?? createDefaultProgramStore()));
+}
+
+function getCurrentProgramId() {
+  return currentProgramId;
+}
+
+global.SilidoxLadder = Object.freeze({
+  init: initLadderEditor,
+  selectProgram,
+  evaluateProgram,
+  programReady,
+  exportPrograms,
+  getProgramStore,
+  getCurrentProgramId,
+  createProgramStoreFromRaw,
+  render: () => renderEditor(currentSignals()),
+  compileCurrent: compileAndReport,
+});
+})(globalThis);
