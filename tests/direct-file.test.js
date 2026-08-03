@@ -12,6 +12,7 @@ const scriptSources = Array.from(
 assert.deepEqual(scriptSources, [
   "./src/data.js",
   "./src/simulation.js",
+  "./src/inner-landscape.js",
   "./src/ladder-editor.js",
   "./src/automation-plan.js",
   "./src/ui.js",

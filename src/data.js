@@ -10,12 +10,16 @@
     core: 100,
     energy: 100,
     material: 999,
+    ore: 120,
+    parts: 60,
   };
 
   const STARTING_RESOURCES = {
     core: 25,
     energy: 30,
     material: 0,
+    ore: 0,
+    parts: 0,
   };
 
   const TRACK = {
@@ -42,6 +46,16 @@
     generatorEnergyPerSecond: 0.15,
     controlEnergyPerWork: 0.002,
     controllerScanMs: 1000,
+  };
+
+  const INDUSTRY_RULES = {
+    veinPositions: [1, 3, 6],
+    veinRespawnMs: 10000,
+    veinRewardOre: 2,
+    veinRewardMaterial: 1,
+    processorRecipeOre: 2,
+    processorRecipeParts: 1,
+    processorCycleMs: 5000,
   };
 
   const CONTROLLERS = {
@@ -92,6 +106,12 @@
       name: "修复频谱传感器",
       durationMs: 90000,
       materialCost: 1,
+    },
+    processor: {
+      id: "processor",
+      name: "搭建部件加工台",
+      durationMs: 120000,
+      materialCost: 4,
     },
     anomalySample: {
       id: "anomalySample",
@@ -149,6 +169,7 @@
     workshop: "工坊",
     observation: "异常观测",
     anomaly: "非守恒证据",
+    industry: "工业",
   };
 
   global.SilidoxData = Object.freeze({
@@ -162,6 +183,7 @@
     TRACK,
     SALVAGE_REWARD,
     SURVIVAL_RULES,
+    INDUSTRY_RULES,
     CONTROLLERS,
     JOBS,
     CONTROL_CONTEXTS,

@@ -46,7 +46,7 @@ function startAndFinish(state, jobId) {
 
 function testInitialRecovery() {
   const state = Simulation.createState();
-  assert.deepEqual(state.resources, { core: 25, energy: 30, material: 0 });
+  assert.deepEqual(state.resources, { core: 25, energy: 30, material: 0, ore: 0, parts: 0 });
   assert.equal(state.stage, "recovery");
   assert.equal(state.unlocks.environment, false);
 
@@ -226,8 +226,76 @@ function testLegacyLadderArchive() {
   assert.equal(store.version, 3);
 }
 
+function testIndustryChapter() {
+  const state = Simulation.createState();
+  heartbeatThreeTimes(state);
+  collectAllSalvage(state);
+  Simulation.performAction(state, "installController", "heart");
+  startAndFinish(state, "bench");
+  startAndFinish(state, "generator");
+  startAndFinish(state, "sensor");
+  moveTo(state, Data.TRACK.anomaly);
+  startAndFinish(state, "anomalySample");
+  startAndFinish(state, "anomalySample");
+  startAndFinish(state, "anomalySample");
+  assert.equal(state.anomaly.confirmed, true);
+  assert.deepEqual(state.world.veins, Data.INDUSTRY_RULES.veinPositions);
+
+  moveTo(state, Data.INDUSTRY_RULES.veinPositions[0]);
+  assert.equal(Simulation.veinAtPosition(state), true);
+  assert.equal(Simulation.performAction(state, "pickup"), true);
+  assert.equal(state.resources.ore, Data.INDUSTRY_RULES.veinRewardOre);
+  assert.equal(state.resources.material, 6);
+  assert.equal(state.milestones.orePickups, 1);
+  assert.equal(Simulation.veinAtPosition(state), false);
+  advanceFor(state, Data.INDUSTRY_RULES.veinRespawnMs);
+  assert.equal(Simulation.veinAtPosition(state), true);
+
+  assert.equal(Simulation.jobAvailable(state, "processor"), true);
+  assert.equal(Simulation.performAction(state, "startJob", "processor"), true);
+  advanceFor(state, Data.JOBS.processor.durationMs);
+  assert.equal(state.structures.processor, true);
+  assert.equal(state.stage, "industry");
+
+  state.resources.ore = 10;
+  advanceFor(state, Data.INDUSTRY_RULES.processorCycleMs * 2);
+  assert.equal(state.resources.parts, 2);
+  assert.equal(state.resources.ore, 6);
+
+  state.resources.parts = Data.RESOURCE_LIMITS.parts;
+  state.resources.ore = 10;
+  const oreBefore = state.resources.ore;
+  advanceFor(state, Data.INDUSTRY_RULES.processorCycleMs * 3);
+  assert.equal(state.resources.parts, Data.RESOURCE_LIMITS.parts);
+  assert.equal(state.resources.ore, oreBefore);
+}
+
+function testIndustryStatePersistence() {
+  const state = Simulation.createState();
+  state.anomaly.confirmed = true;
+  state.resources.ore = 7;
+  state.resources.parts = 3;
+  state.industry.processorMs = 4000;
+  state.industry.batches = 2;
+  const loaded = Simulation.normalizeState(JSON.parse(JSON.stringify(state)));
+  assert.deepEqual(loaded.world.veins, Data.INDUSTRY_RULES.veinPositions);
+  assert.equal(loaded.resources.ore, 7);
+  assert.equal(loaded.resources.parts, 3);
+  assert.equal(loaded.industry.batches, 2);
+
+  const raw = Simulation.createState();
+  raw.world.veins = [1, 1, 99];
+  raw.world.veinRespawn = { 3: 5000, 6: 25000 };
+  const sanitized = Simulation.normalizeState(JSON.parse(JSON.stringify(raw)));
+  assert.deepEqual(sanitized.world.veins, [1]);
+  assert.equal(sanitized.world.veinRespawn[3], 5000);
+  assert.equal(sanitized.world.veinRespawn[6], Data.INDUSTRY_RULES.veinRespawnMs);
+}
+
 testInitialRecovery();
 testPhysicalSalvageLoop();
+testIndustryChapter();
+testIndustryStatePersistence();
 testRecoverableShutdown();
 testLadderOptimizationBenefit();
 testControllerEdgeCases();

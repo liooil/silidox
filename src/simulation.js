@@ -2,6 +2,7 @@
 (function defineSilidoxSimulation(global) {
   const {
     CONTROLLERS,
+    INDUSTRY_RULES,
     JOBS,
     RESOURCE_LIMITS,
     SALVAGE_REWARD,
@@ -30,6 +31,7 @@
         manualHeartbeats: 0,
         manualMoves: 0,
         pickups: 0,
+        orePickups: 0,
         shutdowns: 0,
       },
       controllers: {
@@ -41,6 +43,7 @@
         bench: false,
         generator: false,
         sensor: false,
+        processor: false,
       },
       control: {
         currentLoad: 0,
@@ -55,11 +58,17 @@
         position: TRACK.start,
         direction: 1,
         salvage: [...TRACK.salvage],
+        veins: [],
+        veinRespawn: {},
       },
       anomaly: {
         revealed: false,
         samples: 0,
         confirmed: false,
+      },
+      industry: {
+        processorMs: 0,
+        batches: 0,
       },
       job: null,
       shutdown: false,
@@ -151,10 +160,32 @@
           .filter((position) => Number.isInteger(position) && TRACK.salvage.includes(position))
           .filter((position, index, list) => list.indexOf(position) === index)
       : [...TRACK.salvage];
+    base.world.veins = Array.isArray(value.world?.veins)
+      ? value.world.veins
+          .filter(
+            (position) =>
+              Number.isInteger(position) && INDUSTRY_RULES.veinPositions.includes(position),
+          )
+          .filter((position, index, list) => list.indexOf(position) === index)
+      : [];
+    base.world.veinRespawn = {};
+    if (value.world?.veinRespawn && typeof value.world.veinRespawn === "object") {
+      for (const position of INDUSTRY_RULES.veinPositions) {
+        const remaining = Number(value.world.veinRespawn[position]);
+        if (Number.isFinite(remaining)) {
+          base.world.veinRespawn[position] = Math.max(
+            0,
+            Math.min(remaining, INDUSTRY_RULES.veinRespawnMs),
+          );
+        }
+      }
+    }
 
     base.anomaly.revealed = Boolean(value.anomaly?.revealed);
     base.anomaly.samples = Math.floor(finite(value.anomaly?.samples, 0, 3));
     base.anomaly.confirmed = Boolean(value.anomaly?.confirmed);
+    base.industry.processorMs = finite(value.industry?.processorMs, 0, 600000);
+    base.industry.batches = Math.floor(finite(value.industry?.batches, 0, 999999));
     base.shutdown = Boolean(value.shutdown);
     if (base.shutdown) base.resources.core = 0;
 
@@ -232,6 +263,8 @@
 
     advanceJob(state, boundedDelta);
     advanceControllers(state, boundedDelta, evaluateProgram);
+    advanceVeins(state, boundedDelta);
+    advanceProcessor(state, boundedDelta);
     applyControlEnergy(state, boundedDelta);
     return state;
   }
@@ -346,7 +379,7 @@
       };
     }
     return {
-      I0: salvageAtPosition(state),
+      I0: pickupAvailable(state),
       0: false,
       1: true,
     };
@@ -456,14 +489,27 @@
   }
 
   function pickup(state, source) {
-    if (!state.unlocks.environment || !salvageAtPosition(state)) return false;
+    if (!state.unlocks.environment) return false;
+    const hasSalvage = salvageAtPosition(state);
+    const hasVein = veinAtPosition(state);
+    if (!hasSalvage && !hasVein) return false;
     if (!spendResource(state, "energy", SURVIVAL_RULES.pickupEnergy)) return false;
 
-    state.world.salvage = state.world.salvage.filter(
-      (position) => position !== state.world.position,
-    );
-    addResource(state, "energy", SALVAGE_REWARD.energy);
-    addResource(state, "material", SALVAGE_REWARD.material);
+    if (hasSalvage) {
+      state.world.salvage = state.world.salvage.filter(
+        (position) => position !== state.world.position,
+      );
+      addResource(state, "energy", SALVAGE_REWARD.energy);
+      addResource(state, "material", SALVAGE_REWARD.material);
+    } else {
+      state.world.veins = state.world.veins.filter(
+        (position) => position !== state.world.position,
+      );
+      state.world.veinRespawn[state.world.position] = INDUSTRY_RULES.veinRespawnMs;
+      addResource(state, "ore", INDUSTRY_RULES.veinRewardOre);
+      addResource(state, "material", INDUSTRY_RULES.veinRewardMaterial);
+      state.milestones.orePickups += 1;
+    }
     state.milestones.pickups += 1;
     state.controllers.pickup.outputCount += 1;
     state.controllers.pickup.energySpent += SURVIVAL_RULES.pickupEnergy;
@@ -473,7 +519,9 @@
       log(
         state,
         "good",
-        `回收残骸：能源 +${SALVAGE_REWARD.energy}，材料 +${SALVAGE_REWARD.material}。`,
+        hasSalvage
+          ? `回收残骸：能源 +${SALVAGE_REWARD.energy}，材料 +${SALVAGE_REWARD.material}。`
+          : `采集矿材：矿石 +${INDUSTRY_RULES.veinRewardOre}，材料 +${INDUSTRY_RULES.veinRewardMaterial}。`,
       );
     }
     return true;
@@ -541,6 +589,13 @@
         state.world.position === TRACK.anomaly
       );
     }
+    if (id === "processor") {
+      return (
+        state.anomaly.confirmed &&
+        state.milestones.orePickups >= 1 &&
+        !state.structures.processor
+      );
+    }
     return false;
   }
 
@@ -572,10 +627,17 @@
         state.anomaly.confirmed = true;
         state.unlocks.anomaly = true;
         state.stage = "anomaly";
+        activateVeins(state);
         log(state, "good", "三次采样一致：残阵输出持续大于可测物理输入。");
+        log(state, "info", "矿脉在轨道上出现。继续工业化，为制造灵气接口准备材料。");
       } else {
         log(state, "warn", `异常样本 ${state.anomaly.samples}/3 已记录。`);
       }
+    }
+    if (id === "processor") {
+      state.structures.processor = true;
+      state.stage = "industry";
+      log(state, "good", "部件加工台投入使用。矿石可以转化为标准部件。");
     }
   }
 
@@ -594,7 +656,10 @@
     if (state.resources.core >= 75 || state.stage !== "recovery") {
       state.unlocks.environment = true;
     }
-    if (state.anomaly.confirmed) state.unlocks.anomaly = true;
+    if (state.anomaly.confirmed) {
+      state.unlocks.anomaly = true;
+      activateVeins(state);
+    }
   }
 
   function addResource(state, resource, amount) {
@@ -620,6 +685,56 @@
     return state.world.salvage.includes(state.world.position);
   }
 
+  function veinAtPosition(state) {
+    return state.world.veins.includes(state.world.position);
+  }
+
+  function pickupAvailable(state) {
+    return salvageAtPosition(state) || veinAtPosition(state);
+  }
+
+  function activateVeins(state) {
+    for (const position of INDUSTRY_RULES.veinPositions) {
+      if (!state.world.veins.includes(position)) state.world.veins.push(position);
+      delete state.world.veinRespawn[position];
+    }
+  }
+
+  function advanceVeins(state, deltaMs) {
+    if (!state.anomaly.confirmed) return;
+    for (const position of INDUSTRY_RULES.veinPositions) {
+      if (state.world.veins.includes(position)) continue;
+      const remaining = (state.world.veinRespawn[position] ?? 0) - deltaMs;
+      if (remaining <= 0) {
+        state.world.veins.push(position);
+        delete state.world.veinRespawn[position];
+      } else {
+        state.world.veinRespawn[position] = remaining;
+      }
+    }
+  }
+
+  function advanceProcessor(state, deltaMs) {
+    if (!state.structures.processor) {
+      state.industry.processorMs = 0;
+      return;
+    }
+    state.industry.processorMs += deltaMs;
+    while (
+      state.industry.processorMs >= INDUSTRY_RULES.processorCycleMs &&
+      state.resources.ore >= INDUSTRY_RULES.processorRecipeOre &&
+      state.resources.parts < RESOURCE_LIMITS.parts
+    ) {
+      state.industry.processorMs -= INDUSTRY_RULES.processorCycleMs;
+      spendResource(state, "ore", INDUSTRY_RULES.processorRecipeOre);
+      addResource(state, "parts", INDUSTRY_RULES.processorRecipeParts);
+      state.industry.batches += 1;
+      if (state.industry.batches === 1) {
+        log(state, "good", "加工台完成第一批标准部件。");
+      }
+    }
+  }
+
   function objective(state) {
     if (state.shutdown) {
       return state.emergency.charge > 0
@@ -632,7 +747,13 @@
     if (!state.structures.generator) return "修复热差发电器，建立稳定的物理供能。";
     if (!state.structures.sensor) return "修复频谱传感器，检查环境中的未知输出。";
     if (!state.anomaly.confirmed) return "对残阵完成三次独立采样，排除传感器误差。";
-    return "非守恒输出已经确认。维持工坊，并寻找理解这种现象的方法。";
+    if (state.milestones.orePickups === 0) {
+      return "非守恒输出已经确认。矿脉已在轨道出现，采集矿石建立稳定的原料来源。";
+    }
+    if (!state.structures.processor) {
+      return "搭建部件加工台，把矿石加工成标准部件。";
+    }
+    return "部件是灵性接口与内景部件的基础材料。维持生产，并寻找解释异常的方法。";
   }
 
   function stageProgress(state) {
@@ -643,6 +764,7 @@
       return (Number(state.structures.generator) + Number(state.structures.sensor)) / 2;
     }
     if (state.stage === "observation") return state.anomaly.samples / 3;
+    if (state.stage === "industry") return Math.min(1, state.industry.batches / 8);
     return 1;
   }
 
@@ -659,5 +781,7 @@
     stageProgress,
     atBoundary,
     salvageAtPosition,
+    veinAtPosition,
+    pickupAvailable,
   });
 })(globalThis);

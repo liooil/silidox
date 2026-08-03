@@ -29,6 +29,7 @@ index.html
   -> styles.css
   -> src/data.js
   -> src/simulation.js
+  -> src/inner-landscape.js
   -> src/ladder-editor.js
   -> src/automation-plan.js
   -> src/ui.js
@@ -40,8 +41,8 @@ index.html
 只保存静态定义：
 
 - `250ms` 固定步长
-- 能源、材料和核心上限
-- 九格一维轨道与残骸位置
+- 能源、材料、矿石、部件和核心上限
+- 九格一维轨道、残骸位置与矿脉规则
 - 控制器、建设任务与持续时间
 - 设备级梯形图输入输出上下文
 - 存档与程序键名
@@ -56,7 +57,18 @@ index.html
 - 推进核心衰减、停机恢复、能源和建设计时
 - 执行移动、掉头、拾取和控制器动作
 - 运行预设控制与设备梯形图输出
-- 推进维修台、发电器、传感器和残阵采样
+- 推进维修台、发电器、传感器、残阵采样、矿脉重生与部件加工
+
+此文件不得依赖 DOM 或 localStorage，以便直接在 Node 中测试。
+
+### `src/inner-landscape.js`
+
+内景确定性内核：
+
+- 十类节点目录与第一套参考回路
+- 灵流、灵压、纯度、杂质、温度和稳定度推进
+- 过压、过热、污染、振荡四类可解释故障与事件记录
+- 声明式神意控制（模式切换、泄压、排异）与确定性重放
 
 此文件不得依赖 DOM 或 localStorage，以便直接在 Node 中测试。
 
@@ -157,11 +169,13 @@ index.html
 ```bash
 node --check src/data.js
 node --check src/simulation.js
+node --check src/inner-landscape.js
 node --check src/ladder-editor.js
 node --check src/automation-plan.js
 node --check src/ui.js
 node --check src/app.js
 node tests/simulation.test.js
+node tests/inner-landscape.test.js
 node tests/direct-file.test.js
 git diff --check
 ```

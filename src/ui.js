@@ -3,7 +3,9 @@
   const {
     CONTROLLERS,
     CONTROL_CONTEXTS,
+    INDUSTRY_RULES,
     JOBS,
+    SALVAGE_REWARD,
     STAGE_LABELS,
     SURVIVAL_RULES,
     TRACK,
@@ -118,6 +120,8 @@
       els.coreReadout.textContent = String(Math.ceil(state.resources.core));
       els.energyReadout.textContent = state.resources.energy.toFixed(1);
       els.materialReadout.textContent = String(Math.floor(state.resources.material));
+      els.oreReadout.textContent = String(Math.floor(state.resources.ore));
+      els.partsReadout.textContent = String(Math.floor(state.resources.parts));
       els.controlLoadReadout.textContent = state.control.currentLoad.toFixed(1);
       els.objectiveText.textContent = Simulation.objective(state);
 
@@ -205,6 +209,12 @@
           salvage.title = "可回收残骸";
           cell.appendChild(salvage);
         }
+        if (state.world.veins.includes(position)) {
+          const vein = document.createElement("span");
+          vein.className = "vein-marker";
+          vein.title = "成熟矿脉";
+          cell.appendChild(vein);
+        }
         if (state.world.position === position) {
           const robot = document.createElement("span");
           robot.className = "robot-marker";
@@ -231,14 +241,21 @@
         state.shutdown ||
         state.clock.paused ||
         state.resources.energy < SURVIVAL_RULES.reverseEnergy;
+      const salvageHere = Simulation.salvageAtPosition(state);
+      const veinHere = Simulation.veinAtPosition(state);
       els.pickupBtn.disabled =
         state.shutdown ||
         state.clock.paused ||
-        !Simulation.salvageAtPosition(state) ||
+        !Simulation.pickupAvailable(state) ||
         state.resources.energy < SURVIVAL_RULES.pickupEnergy;
+      els.pickupBtn.textContent = veinHere && !salvageHere ? "采集矿材" : "拾取残骸";
 
-      if (Simulation.salvageAtPosition(state)) {
-        els.environmentHint.textContent = "当前位置检测到残骸：可回收 8 能源与 5 材料。";
+      if (salvageHere) {
+        els.environmentHint.textContent =
+          `当前位置检测到残骸：可回收 ${SALVAGE_REWARD.energy} 能源与 ${SALVAGE_REWARD.material} 材料。`;
+      } else if (veinHere) {
+        els.environmentHint.textContent =
+          `当前位置有成熟矿脉：可采集 ${INDUSTRY_RULES.veinRewardOre} 矿石与 ${INDUSTRY_RULES.veinRewardMaterial} 材料。`;
       } else if (Simulation.atBoundary(state)) {
         els.environmentHint.textContent = "前方是轨道边界，需要先掉头。";
       } else if (state.anomaly.revealed && state.world.position === TRACK.anomaly) {
@@ -346,6 +363,7 @@
 
       const ids = ["bench", "generator", "sensor"];
       if (state.anomaly.revealed && !state.anomaly.confirmed) ids.push("anomalySample");
+      if (state.anomaly.confirmed) ids.push("processor");
       els.buildList.replaceChildren(...ids.map((id) => createBuildItem(state, id)));
     }
 
@@ -355,7 +373,8 @@
         (id === "bench" && state.structures.bench) ||
         (id === "generator" && state.structures.generator) ||
         (id === "sensor" && state.structures.sensor) ||
-        (id === "anomalySample" && state.anomaly.confirmed);
+        (id === "anomalySample" && state.anomaly.confirmed) ||
+        (id === "processor" && state.structures.processor);
       const available = Simulation.jobAvailable(state, id);
       const item = document.createElement("article");
       item.className = "build-item";
@@ -403,6 +422,9 @@
       if (id === "bench") return "提供设备拆装与维修能力，是后续工坊设施的基础。";
       if (id === "generator") return "从环境温差持续取得少量能源，维持基础物理生产。";
       if (id === "sensor") return "扩展观测频段，用于检查无法解释的环境输出。";
+      if (id === "processor") {
+        return "把矿石加工成标准部件。部件是灵性接口与内景部件的基础材料。";
+      }
       if (state.world.position !== TRACK.anomaly) {
         return `残阵位于轨道 ${TRACK.anomaly}。需要先把机体移动到现场。`;
       }
@@ -528,6 +550,8 @@
       coreReadout: byId("coreReadout"),
       energyReadout: byId("energyReadout"),
       materialReadout: byId("materialReadout"),
+      oreReadout: byId("oreReadout"),
+      partsReadout: byId("partsReadout"),
       controlLoadReadout: byId("controlLoadReadout"),
       objectiveText: byId("objectiveText"),
       stageProgress: byId("stageProgress"),

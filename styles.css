@@ -151,7 +151,7 @@ dl {
 
 .resource-strip {
   display: grid;
-  grid-template-columns: repeat(4, minmax(72px, auto));
+  grid-template-columns: repeat(6, minmax(64px, auto));
   margin: 0;
 }
 
@@ -598,6 +598,16 @@ dl {
   height: 18px;
   border: 1px solid var(--green);
   background: #1a5a31;
+}
+
+.vein-marker {
+  position: relative;
+  z-index: 1;
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--cyan);
+  border-radius: 50%;
+  background: #123d4d;
 }
 
 .robot-marker {
@@ -1298,7 +1308,7 @@ body.shutdown .primary-action span {
   .resource-strip {
     grid-column: 1 / -1;
     grid-row: 2;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     width: 100%;
     border-top: 1px solid var(--line);
     padding-top: 8px;

@@ -21,6 +21,7 @@ index.html
   -> styles.css
   -> src/data.js
   -> src/simulation.js
+  -> src/inner-landscape.js
   -> src/ladder-editor.js
   -> src/automation-plan.js
   -> src/ui.js
@@ -31,6 +32,7 @@ index.html
 
 - `src/data.js`：静态资源、轨道、建设、控制器与设备 I/O 定义；不读取存档或 DOM。
 - `src/simulation.js`：确定性的资源、停机、移动、建设、控制与阶段推进；不访问 DOM 或 localStorage。
+- `src/inner-landscape.js`：内景确定性内核；节点灵流、灵压、温度、杂质、稳定度推进与四类故障检测；不访问 DOM 或 localStorage。
 - `src/ladder-editor.js`：多设备梯形图存储、迁移、编辑、编译、渲染与求值。
 - `src/automation-plan.js`：把设备程序转换成声明式离线执行计划，不包含可执行 JavaScript。
 - `src/ui.js`：DOM 缓存、事件绑定、工作区和诊断界面渲染。
