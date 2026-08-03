@@ -149,7 +149,6 @@ index.html
 - `world/mortal-societies.md`：凡人意识形态与政治制度
 - `world/production-relations.md`：自动化、所有权、劳动和社会冲突
 - `world/naming-guide.md`：命名研究与规则
-- `world/ai-character-contract.md`：AI 角色卡和游戏状态协议
 
 人物与势力正式命名前遵循命名规范。在线模型始终可选，输出不可信，所有行动必须由本地引擎验证。
 

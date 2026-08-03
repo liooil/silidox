@@ -10,7 +10,7 @@ Silidox 可以始终以玩法为核心，但世界本身应该比当前可玩的
 - **暂定：** 方向成立，但可能随玩法继续调整。
 - **钩子：** 可用于未来关卡、势力、物品、事件或文本的种子。
 
-详细专题文档位于 `world/`。内景修炼的正典与原型边界见 [`world/inner-landscape.md`](world/inner-landscape.md)；人物与势力正式命名前遵循 [`world/naming-guide.md`](world/naming-guide.md)；AI 角色的局内输入、决策与记忆边界见 [`world/ai-character-contract.md`](world/ai-character-contract.md)。
+详细专题文档位于 `world/`。内景修炼的正典与原型边界见 [`world/inner-landscape.md`](world/inner-landscape.md)；人物与势力正式命名前遵循 [`world/naming-guide.md`](world/naming-guide.md)。
 
 ## 核心前提
 
