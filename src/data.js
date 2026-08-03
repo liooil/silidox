@@ -9,6 +9,7 @@
   const RESOURCE_LIMITS = {
     core: 100,
     energy: 100,
+    wood: 120,
     material: 999,
     ore: 120,
     parts: 60,
@@ -17,6 +18,7 @@
   const STARTING_RESOURCES = {
     core: 25,
     energy: 30,
+    wood: 0,
     material: 0,
     ore: 0,
     parts: 0,
@@ -25,13 +27,19 @@
   const TRACK = {
     length: 9,
     start: 0,
-    salvage: [2, 5, 7],
+    trees: [2, 5, 7],
     anomaly: 8,
+    anomalyDepth: 4,
   };
 
-  const SALVAGE_REWARD = {
-    energy: 8,
-    material: 5,
+  const FOREST_RULES = {
+    treeRespawnMs: 12000,
+    woodPerTree: 4,
+    manualBurnWood: 1,
+    energyPerWood: 8,
+    generatorEnergyPerSecond: 0.5,
+    generatorReserveTarget: 75,
+    generatorWoodReserve: 1,
   };
 
   const SURVIVAL_RULES = {
@@ -40,19 +48,29 @@
     heartbeatRestore: 25,
     moveEnergy: 0.5,
     reverseEnergy: 0.1,
-    pickupEnergy: 0.5,
+    harvestEnergy: 0.5,
     emergencyRechargeMs: 2000,
     emergencyPulsesRequired: 3,
-    generatorEnergyPerSecond: 0.15,
     controlEnergyPerWork: 0.002,
     controllerScanMs: 1000,
   };
 
+  const MINING_RULES = {
+    maxDepth: 4,
+    digEnergy: 1,
+    verticalMoveEnergy: 0.2,
+    hardnessByDepth: [0, 2, 3, 4, 5],
+    materialByDepth: [0, 2, 2, 3, 3],
+    oreByCell: Object.freeze({
+      "1:3": 2,
+      "2:2": 2,
+      "5:3": 3,
+      "7:2": 2,
+      "8:4": 4,
+    }),
+  };
+
   const INDUSTRY_RULES = {
-    veinPositions: [1, 3, 6],
-    veinRespawnMs: 10000,
-    veinRewardOre: 2,
-    veinRewardMaterial: 1,
     processorRecipeOre: 2,
     processorRecipeParts: 1,
     processorCycleMs: 5000,
@@ -63,61 +81,76 @@
       id: "heart",
       name: "核心控制器",
       programId: "body.heart",
-      materialCost: 3,
+      cost: { resource: "wood", amount: 3 },
       presetIntervalMs: 8000,
       presetLoad: 4,
       unlockHint: "完成三次手动核心脉冲后可安装",
     },
     drive: {
       id: "drive",
-      name: "轨道驱动器",
+      name: "行走控制器",
       programId: "environment.drive",
-      materialCost: 3,
+      cost: { resource: "wood", amount: 3 },
       presetIntervalMs: 2000,
       presetLoad: 3,
       unlockHint: "完成三次手动移动后可安装",
     },
     pickup: {
       id: "pickup",
-      name: "拾取控制器",
+      name: "伐木控制器",
       programId: "environment.pickup",
-      materialCost: 2,
+      cost: { resource: "wood", amount: 2 },
       presetIntervalMs: 1000,
       presetLoad: 2,
-      unlockHint: "手动拾取第一份残骸后可安装",
+      unlockHint: "第一次手动伐木后可安装",
+    },
+    excavator: {
+      id: "excavator",
+      name: "采掘控制器",
+      programId: "environment.excavator",
+      cost: { resource: "material", amount: 3 },
+      presetIntervalMs: 1250,
+      presetLoad: 3,
+      unlockHint: "手动击穿第一层岩体后可安装",
     },
   };
 
   const JOBS = {
+    mineHead: {
+      id: "mineHead",
+      name: "装配简易掘进头",
+      durationMs: 20000,
+      cost: { resource: "wood", amount: 4 },
+    },
     bench: {
       id: "bench",
       name: "搭建基础维修台",
       durationMs: 45000,
-      materialCost: 4,
+      cost: { resource: "material", amount: 4 },
     },
     generator: {
       id: "generator",
-      name: "修复热差发电器",
+      name: "搭建木气化炉",
       durationMs: 60000,
-      materialCost: 2,
+      cost: { resource: "wood", amount: 2 },
     },
     sensor: {
       id: "sensor",
       name: "修复频谱传感器",
       durationMs: 90000,
-      materialCost: 1,
+      cost: { resource: "material", amount: 3 },
     },
     processor: {
       id: "processor",
       name: "搭建部件加工台",
       durationMs: 120000,
-      materialCost: 4,
+      cost: { resource: "material", amount: 4 },
     },
     anomalySample: {
       id: "anomalySample",
       name: "采样残阵输出",
       durationMs: 20000,
-      materialCost: 0,
+      cost: null,
     },
   };
 
@@ -136,24 +169,37 @@
     "environment.drive": {
       id: "environment.drive",
       controllerId: "drive",
-      name: "环境 / 轨道驱动",
+      name: "环境 / 林地行走",
       description: "根据边界信号控制前进与掉头。",
       inputs: [
         { id: "I0", name: "前方边界", signal: "AT_BOUNDARY" },
         { id: "I1", name: "位于起点", signal: "AT_ORIGIN" },
+        { id: "I2", name: "位于地下", signal: "BELOW_SURFACE" },
       ],
       outputs: [
         { id: "Q0", name: "向前移动", action: "DRIVE" },
         { id: "Q1", name: "切换方向", action: "REVERSE" },
+        { id: "Q2", name: "向上返回", action: "ASCEND" },
       ],
     },
     "environment.pickup": {
       id: "environment.pickup",
       controllerId: "pickup",
-      name: "环境 / 残骸拾取",
-      description: "仅在当前位置存在残骸时执行拾取。",
-      inputs: [{ id: "I0", name: "残骸存在", signal: "SALVAGE_PRESENT" }],
-      outputs: [{ id: "Q0", name: "拾取残骸", action: "PICKUP" }],
+      name: "环境 / 地表伐木",
+      description: "仅在地表当前位置存在成熟树木时执行伐木。",
+      inputs: [{ id: "I0", name: "成熟树木", signal: "TREE_PRESENT" }],
+      outputs: [{ id: "Q0", name: "执行伐木", action: "HARVEST" }],
+    },
+    "environment.excavator": {
+      id: "environment.excavator",
+      controllerId: "excavator",
+      name: "环境 / 向下采掘",
+      description: "在当前横向位置持续掘进，击穿岩层后进入下一深度。",
+      inputs: [
+        { id: "I0", name: "可以向下", signal: "CAN_DIG_DOWN" },
+        { id: "I1", name: "下层含矿", signal: "ORE_BELOW" },
+      ],
+      outputs: [{ id: "Q0", name: "向下掘进", action: "DIG_DOWN" }],
     },
   };
 
@@ -166,6 +212,7 @@
     recovery: "复苏",
     survival: "求生",
     stabilization: "稳态",
+    mining: "采掘",
     workshop: "工坊",
     observation: "异常观测",
     anomaly: "非守恒证据",
@@ -181,7 +228,8 @@
     RESOURCE_LIMITS,
     STARTING_RESOURCES,
     TRACK,
-    SALVAGE_REWARD,
+    FOREST_RULES,
+    MINING_RULES,
     SURVIVAL_RULES,
     INDUSTRY_RULES,
     CONTROLLERS,

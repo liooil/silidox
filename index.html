@@ -29,7 +29,11 @@
             <dd id="energyReadout">30.0</dd>
           </div>
           <div>
-            <dt>材料</dt>
+            <dt>木材</dt>
+            <dd id="woodReadout">0</dd>
+          </div>
+          <div>
+            <dt>结构料</dt>
             <dd id="materialReadout">0</dd>
           </div>
           <div>
@@ -138,28 +142,41 @@
           <header class="workspace-heading">
             <div>
               <span>外部执行器</span>
-              <h2>一维环境</h2>
+              <h2 id="environmentTitle">森林地表</h2>
             </div>
-            <p>轨道没有障碍物。移动、掉头并回收沿途残骸，先取得活下去所需的能源与材料。</p>
+            <p id="environmentDescription">地表没有障碍物。移动、掉头并反复伐木，在建设材料与燃料能源之间分配木材。</p>
           </header>
 
           <section class="track-console" aria-labelledby="trackTitle">
             <div class="section-heading">
               <div>
-                <span>位置观测</span>
-                <h3 id="trackTitle">残骸轨道</h3>
+                <span id="trackEyebrow">地表观测</span>
+                <h3 id="trackTitle">林间横断带</h3>
               </div>
-              <strong id="trackPosition">位置 0 · 向东</strong>
+              <strong id="trackPosition">横向 0 · 地表</strong>
             </div>
 
-            <div class="track" id="track" aria-label="一维轨道"></div>
+            <div class="track" id="track" aria-label="森林地表"></div>
+
+            <div class="mining-readout" id="miningReadout" hidden>
+              <div>
+                <span id="miningTarget">目标岩层</span>
+                <strong id="miningProgressText">0 / 2</strong>
+              </div>
+              <div class="mining-progress" role="progressbar" aria-label="掘进进度">
+                <i id="miningProgressBar"></i>
+              </div>
+            </div>
 
             <div class="manual-controls" aria-label="手动环境操作">
               <button id="moveBtn">向前一步</button>
               <button id="reverseBtn">掉头</button>
-              <button class="primary-button" id="pickupBtn">拾取残骸</button>
+              <button class="primary-button" id="pickupBtn">伐木</button>
+              <button id="burnWoodBtn">燃烧 1 木材 · +8 能源</button>
+              <button class="primary-button" id="digBtn" hidden>向下掘进</button>
+              <button id="ascendBtn" hidden>沿竖井上升</button>
             </div>
-            <p class="context-hint" id="environmentHint">当前位置没有可拾取目标。</p>
+            <p class="context-hint" id="environmentHint">当前位置没有可采集目标。继续沿林地移动。</p>
           </section>
 
           <section class="controller-section environment-controllers" aria-labelledby="environmentControlTitle">
@@ -179,7 +196,7 @@
               <span>物理生产</span>
               <h2>基础工坊</h2>
             </div>
-            <p>回收只是临时手段。建立维修、供能与观测设备，才能把求生变成可以持续的生产系统。</p>
+            <p>用木材装配采掘工具，再把地下结构料与矿石送入维修、供能、观测和加工设备。</p>
           </header>
 
           <section class="active-job" id="activeJob" hidden aria-live="polite">

@@ -532,6 +532,20 @@ function isRungEnergized(rung, sensors) {
 }
 
 
+function updateEnergizedStates(sensors) {
+  const energized = new Set(
+    compiled.rungs
+      .filter((rung) => isRungEnergized(rung, sensors))
+      .map((rung) => rung.id),
+  );
+  for (const row of ladderEls.rungList.querySelectorAll(".rung-row")) {
+    const isOn = energized.has(row.dataset.rungId);
+    row.classList.toggle("energized", isOn);
+    const status = row.querySelector(".rung-state");
+    if (status) status.textContent = isOn ? "ON" : "OFF";
+  }
+}
+
 function renderEditor(sensors) {
   if (ladder.length > 0) ensureSelection();
   refreshInputOptionLabels();
@@ -566,6 +580,7 @@ function diagramWidth(rung) {
 function renderRungRow({ rung, index, width }, energized) {
   const row = ladderEls.rungList.appendChild(document.createElement("article"));
   row.className = "rung-row";
+  row.dataset.rungId = rung.id;
   row.classList.toggle("energized", energized);
   row.classList.toggle("selected", selectedNode?.rungId === rung.id);
   row.classList.toggle("disabled", rung.enabled === false);
@@ -573,7 +588,7 @@ function renderRungRow({ rung, index, width }, energized) {
 
   const header = row.appendChild(document.createElement("div"));
   header.className = "rung-row-header";
-  header.addEventListener("click", () => {
+  header.addEventListener("pointerdown", () => {
     selectedNode = { rungId: rung.id, type: "rung" };
     renderEditor(currentSignals());
   });
@@ -626,7 +641,7 @@ function renderRungRow({ rung, index, width }, energized) {
     clearDragState();
   });
 
-  svg.addEventListener("click", (event) => {
+  svg.addEventListener("pointerdown", (event) => {
     const shape = event.target.closest("g.shape");
     if (!shape) {
       selectedNode = { rungId: rung.id, type: "rung" };
@@ -925,7 +940,7 @@ global.SilidoxLadder = Object.freeze({
   getProgramStore,
   getCurrentProgramId,
   createProgramStoreFromRaw,
-  render: () => renderEditor(currentSignals()),
+  render: () => updateEnergizedStates(currentSignals()),
   compileCurrent: compileAndReport,
 });
 })(globalThis);

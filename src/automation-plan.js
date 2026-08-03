@@ -1,6 +1,6 @@
 // Declarative automation export shared by the browser and a future local runner.
 (function defineAutomationPlan(global) {
-  const { CONTROLLERS, CONTROL_CONTEXTS, SURVIVAL_RULES } = global.SilidoxData;
+  const { CONTROLLERS, CONTROL_CONTEXTS, MINING_RULES, SURVIVAL_RULES } = global.SilidoxData;
   const SCHEMA = "silidox.automation-plan.v1";
 
   function createPlan(state, programs) {
@@ -31,7 +31,10 @@
       simulation_elapsed_ms: state.clock.elapsedMs,
       resources: {
         energy: round(state.resources.energy),
+        wood: round(state.resources.wood),
         material: round(state.resources.material),
+        ore: round(state.resources.ore),
+        parts: round(state.resources.parts),
       },
       jobs,
     };
@@ -78,9 +81,15 @@
         energy_per_action: SURVIVAL_RULES.moveEnergy,
       };
     }
+    if (controllerId === "excavator") {
+      return {
+        max_actions_per_second: 1,
+        energy_per_action: MINING_RULES.digEnergy,
+      };
+    }
     return {
       max_actions_per_second: 1,
-      energy_per_action: SURVIVAL_RULES.pickupEnergy,
+      energy_per_action: SURVIVAL_RULES.harvestEnergy,
     };
   }
 

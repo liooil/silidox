@@ -2,10 +2,11 @@
 (function defineSilidoxSimulation(global) {
   const {
     CONTROLLERS,
+    FOREST_RULES,
     INDUSTRY_RULES,
     JOBS,
+    MINING_RULES,
     RESOURCE_LIMITS,
-    SALVAGE_REWARD,
     STARTING_RESOURCES,
     SURVIVAL_RULES,
     TRACK,
@@ -25,12 +26,16 @@
         body: true,
         environment: false,
         workshop: false,
+        mining: false,
         anomaly: false,
       },
       milestones: {
         manualHeartbeats: 0,
         manualMoves: 0,
-        pickups: 0,
+        chops: 0,
+        fuelBurns: 0,
+        digs: 0,
+        deepestDepth: 0,
         orePickups: 0,
         shutdowns: 0,
       },
@@ -38,8 +43,10 @@
         heart: createControllerState("heart"),
         drive: createControllerState("drive"),
         pickup: createControllerState("pickup"),
+        excavator: createControllerState("excavator"),
       },
       structures: {
+        mineHead: false,
         bench: false,
         generator: false,
         sensor: false,
@@ -56,10 +63,12 @@
       },
       world: {
         position: TRACK.start,
+        depth: 0,
         direction: 1,
-        salvage: [...TRACK.salvage],
-        veins: [],
-        veinRespawn: {},
+        trees: [...TRACK.trees],
+        treeRespawn: {},
+        excavated: [],
+        digProgress: {},
       },
       anomaly: {
         revealed: false,
@@ -121,6 +130,9 @@
     for (const key of Object.keys(base.milestones)) {
       base.milestones[key] = Math.floor(finite(value.milestones?.[key], 0, 999999));
     }
+    if (value.milestones?.chops == null && value.milestones?.pickups != null) {
+      base.milestones.chops = Math.floor(finite(value.milestones.pickups, 0, 999999));
+    }
 
     for (const id of Object.keys(base.controllers)) {
       const stored = value.controllers?.[id];
@@ -154,32 +166,55 @@
     );
 
     base.world.position = Math.floor(finite(value.world?.position, 0, TRACK.length - 1));
+    base.world.depth = Math.floor(finite(value.world?.depth, 0, MINING_RULES.maxDepth));
     base.world.direction = value.world?.direction === -1 ? -1 : 1;
-    base.world.salvage = Array.isArray(value.world?.salvage)
-      ? value.world.salvage
-          .filter((position) => Number.isInteger(position) && TRACK.salvage.includes(position))
+    base.world.trees = Array.isArray(value.world?.trees)
+      ? value.world.trees
+          .filter((position) => Number.isInteger(position) && TRACK.trees.includes(position))
           .filter((position, index, list) => list.indexOf(position) === index)
-      : [...TRACK.salvage];
-    base.world.veins = Array.isArray(value.world?.veins)
-      ? value.world.veins
-          .filter(
-            (position) =>
-              Number.isInteger(position) && INDUSTRY_RULES.veinPositions.includes(position),
-          )
-          .filter((position, index, list) => list.indexOf(position) === index)
-      : [];
-    base.world.veinRespawn = {};
-    if (value.world?.veinRespawn && typeof value.world.veinRespawn === "object") {
-      for (const position of INDUSTRY_RULES.veinPositions) {
-        const remaining = Number(value.world.veinRespawn[position]);
+      : [...TRACK.trees];
+    base.world.treeRespawn = {};
+    if (value.world?.treeRespawn && typeof value.world.treeRespawn === "object") {
+      for (const position of TRACK.trees) {
+        const remaining = Number(value.world.treeRespawn[position]);
         if (Number.isFinite(remaining)) {
-          base.world.veinRespawn[position] = Math.max(
+          base.world.treeRespawn[position] = Math.max(
             0,
-            Math.min(remaining, INDUSTRY_RULES.veinRespawnMs),
+            Math.min(remaining, FOREST_RULES.treeRespawnMs),
           );
         }
       }
     }
+    base.world.excavated = Array.isArray(value.world?.excavated)
+      ? value.world.excavated
+          .filter((key) => validMineCellKey(key))
+          .filter((key, index, list) => list.indexOf(key) === index)
+      : [];
+    base.world.digProgress = {};
+    if (value.world?.digProgress && typeof value.world.digProgress === "object") {
+      for (const [key, progress] of Object.entries(value.world.digProgress)) {
+        if (!validMineCellKey(key) || base.world.excavated.includes(key)) continue;
+        const { depth } = parseMineCellKey(key);
+        base.world.digProgress[key] = Math.floor(
+          finite(progress, 0, MINING_RULES.hardnessByDepth[depth] - 1),
+        );
+      }
+    }
+    if (base.world.depth > 0) {
+      for (let depth = 1; depth <= base.world.depth; depth += 1) {
+        const key = mineCellKey(base.world.position, depth);
+        if (!base.world.excavated.includes(key)) base.world.excavated.push(key);
+      }
+    }
+    const excavatedDepths = base.world.excavated.map(
+      (key) => parseMineCellKey(key).depth,
+    );
+    base.milestones.digs = Math.max(base.milestones.digs, base.world.excavated.length);
+    base.milestones.deepestDepth = Math.max(
+      base.milestones.deepestDepth,
+      base.world.depth,
+      ...excavatedDepths,
+    );
 
     base.anomaly.revealed = Boolean(value.anomaly?.revealed);
     base.anomaly.samples = Math.floor(finite(value.anomaly?.samples, 0, 3));
@@ -253,17 +288,11 @@
       return state;
     }
 
-    if (state.structures.generator) {
-      addResource(
-        state,
-        "energy",
-        (SURVIVAL_RULES.generatorEnergyPerSecond * boundedDelta) / 1000,
-      );
-    }
+    advanceWoodGenerator(state, boundedDelta);
 
     advanceJob(state, boundedDelta);
     advanceControllers(state, boundedDelta, evaluateProgram);
-    advanceVeins(state, boundedDelta);
+    advanceTrees(state, boundedDelta);
     advanceProcessor(state, boundedDelta);
     applyControlEnergy(state, boundedDelta);
     return state;
@@ -300,6 +329,25 @@
     if (energy > 0) addResource(state, "energy", -energy);
   }
 
+  function advanceWoodGenerator(state, deltaMs) {
+    const availableWood = state.resources.wood - FOREST_RULES.generatorWoodReserve;
+    if (!state.structures.generator || availableWood <= 0) return;
+    const needed = Math.max(
+      0,
+      FOREST_RULES.generatorReserveTarget - state.resources.energy,
+    );
+    if (needed <= 0) return;
+
+    const generated = Math.min(
+      needed,
+      (FOREST_RULES.generatorEnergyPerSecond * deltaMs) / 1000,
+      availableWood * FOREST_RULES.energyPerWood,
+    );
+    if (generated <= 0) return;
+    spendResource(state, "wood", generated / FOREST_RULES.energyPerWood);
+    addResource(state, "energy", generated);
+  }
+
   function calculateControlLoad(state) {
     return Object.values(state.controllers).reduce((total, controller) => {
       if (!controller.installed || controller.mode === "manual") return total;
@@ -329,7 +377,8 @@
 
     if (controller.id === "heart") applyHeartbeat(state, "preset");
     if (controller.id === "drive") presetDrive(state);
-    if (controller.id === "pickup") pickup(state, "preset");
+    if (controller.id === "pickup") harvest(state, "preset");
+    if (controller.id === "excavator") digDown(state, "preset");
   }
 
   function advanceLadderController(state, controller, deltaMs, evaluateProgram) {
@@ -353,11 +402,15 @@
       applyHeartbeat(state, "ladder");
     }
     if (controller.id === "drive") {
-      if (outputs.includes("Q1")) reverse(state, "ladder");
+      if (outputs.includes("Q2")) ascend(state, "ladder");
+      else if (outputs.includes("Q1")) reverse(state, "ladder");
       else if (outputs.includes("Q0")) move(state, "ladder");
     }
     if (controller.id === "pickup" && outputs.includes("Q0")) {
-      pickup(state, "ladder");
+      harvest(state, "ladder");
+    }
+    if (controller.id === "excavator" && outputs.includes("Q0")) {
+      digDown(state, "ladder");
     }
   }
 
@@ -374,12 +427,22 @@
       return {
         I0: atBoundary(state),
         I1: state.world.position === TRACK.start,
+        I2: state.world.depth > 0,
+        0: false,
+        1: true,
+      };
+    }
+    if (controllerId === "excavator") {
+      const target = digTarget(state);
+      return {
+        I0: canDigDown(state),
+        I1: Boolean(target && oreAtCell(target.position, target.depth) > 0),
         0: false,
         1: true,
       };
     }
     return {
-      I0: pickupAvailable(state),
+      I0: harvestAvailable(state),
       0: false,
       1: true,
     };
@@ -396,7 +459,10 @@
     if (action === "heartbeat") return manualHeartbeat(state);
     if (action === "move") return move(state, "manual");
     if (action === "reverse") return reverse(state, "manual");
-    if (action === "pickup") return pickup(state, "manual");
+    if (action === "harvest" || action === "pickup") return harvest(state, "manual");
+    if (action === "digDown") return digDown(state, "manual");
+    if (action === "ascend") return ascend(state, "manual");
+    if (action === "burnWood") return burnWood(state);
     if (action === "installController") return installController(state, payload);
     if (action === "setControllerMode") {
       return setControllerMode(state, payload?.id, payload?.mode);
@@ -460,7 +526,7 @@
   }
 
   function move(state, source) {
-    if (!state.unlocks.environment || atBoundary(state)) return false;
+    if (!state.unlocks.environment || state.world.depth > 0 || atBoundary(state)) return false;
     if (!spendResource(state, "energy", SURVIVAL_RULES.moveEnergy)) return false;
     state.world.position += state.world.direction;
     state.controllers.drive.outputCount += 1;
@@ -468,62 +534,128 @@
     if (source === "manual") {
       state.milestones.manualMoves += 1;
       if (state.milestones.manualMoves >= 3) state.controllers.drive.available = true;
-      log(state, "info", `移动至轨道 ${state.world.position}。`);
+      log(state, "info", `沿地表移动至横向位置 ${state.world.position}。`);
     }
     return true;
   }
 
   function reverse(state, source) {
-    if (!state.unlocks.environment) return false;
+    if (!state.unlocks.environment || state.world.depth > 0) return false;
     if (!spendResource(state, "energy", SURVIVAL_RULES.reverseEnergy)) return false;
     state.world.direction *= -1;
     state.controllers.drive.outputCount += 1;
     state.controllers.drive.energySpent += SURVIVAL_RULES.reverseEnergy;
-    if (source === "manual") log(state, "info", "轨道驱动方向已切换。");
+    if (source === "manual") log(state, "info", "行走方向已切换。");
     return true;
   }
 
   function presetDrive(state) {
+    if (state.world.depth > 0) return;
     if (atBoundary(state)) reverse(state, "preset");
     else move(state, "preset");
   }
 
-  function pickup(state, source) {
-    if (!state.unlocks.environment) return false;
-    const hasSalvage = salvageAtPosition(state);
-    const hasVein = veinAtPosition(state);
-    if (!hasSalvage && !hasVein) return false;
-    if (!spendResource(state, "energy", SURVIVAL_RULES.pickupEnergy)) return false;
+  function harvest(state, source) {
+    if (!state.unlocks.environment || state.world.depth > 0) return false;
+    const hasTree = treeAtPosition(state);
+    if (!hasTree) return false;
+    if (!spendResource(state, "energy", SURVIVAL_RULES.harvestEnergy)) return false;
 
-    if (hasSalvage) {
-      state.world.salvage = state.world.salvage.filter(
-        (position) => position !== state.world.position,
-      );
-      addResource(state, "energy", SALVAGE_REWARD.energy);
-      addResource(state, "material", SALVAGE_REWARD.material);
-    } else {
-      state.world.veins = state.world.veins.filter(
-        (position) => position !== state.world.position,
-      );
-      state.world.veinRespawn[state.world.position] = INDUSTRY_RULES.veinRespawnMs;
-      addResource(state, "ore", INDUSTRY_RULES.veinRewardOre);
-      addResource(state, "material", INDUSTRY_RULES.veinRewardMaterial);
-      state.milestones.orePickups += 1;
-    }
-    state.milestones.pickups += 1;
+    state.world.trees = state.world.trees.filter(
+      (position) => position !== state.world.position,
+    );
+    state.world.treeRespawn[state.world.position] = FOREST_RULES.treeRespawnMs;
+    addResource(state, "wood", FOREST_RULES.woodPerTree);
+    state.milestones.chops += 1;
     state.controllers.pickup.outputCount += 1;
-    state.controllers.pickup.energySpent += SURVIVAL_RULES.pickupEnergy;
+    state.controllers.pickup.energySpent += SURVIVAL_RULES.harvestEnergy;
     state.controllers.pickup.available = true;
     state.unlocks.workshop = true;
     if (source === "manual") {
+      log(state, "good", `伐木完成：木材 +${FOREST_RULES.woodPerTree}。可用于建设或投入燃烧。`);
+    }
+    return true;
+  }
+
+  function digDown(state, source) {
+    if (!canDigDown(state)) return false;
+    const target = digTarget(state);
+    const key = mineCellKey(target.position, target.depth);
+    const excavator = state.controllers.excavator;
+
+    if (cellExcavated(state, target.position, target.depth)) {
+      if (!spendResource(state, "energy", MINING_RULES.verticalMoveEnergy)) return false;
+      state.world.depth = target.depth;
+      excavator.outputCount += 1;
+      excavator.energySpent += MINING_RULES.verticalMoveEnergy;
+      if (source === "manual") log(state, "info", `沿竖井下降至深度 ${state.world.depth}。`);
+      return true;
+    }
+
+    if (!spendResource(state, "energy", MINING_RULES.digEnergy)) return false;
+    const progress = (state.world.digProgress[key] ?? 0) + 1;
+    state.world.digProgress[key] = progress;
+    excavator.outputCount += 1;
+    excavator.energySpent += MINING_RULES.digEnergy;
+
+    const required = MINING_RULES.hardnessByDepth[target.depth];
+    if (progress < required) {
+      if (source === "manual") {
+        log(state, "info", `深度 ${target.depth} 岩层掘进 ${progress}/${required}。`);
+      }
+      return true;
+    }
+
+    delete state.world.digProgress[key];
+    state.world.excavated.push(key);
+    state.world.depth = target.depth;
+    const material = MINING_RULES.materialByDepth[target.depth];
+    const ore = oreAtCell(target.position, target.depth);
+    addResource(state, "material", material);
+    if (ore > 0) {
+      addResource(state, "ore", ore);
+      state.milestones.orePickups += 1;
+    }
+    state.milestones.digs += 1;
+    state.milestones.deepestDepth = Math.max(
+      state.milestones.deepestDepth,
+      target.depth,
+    );
+    excavator.available = true;
+    if (source === "manual") {
+      const oreText = ore > 0 ? `，矿石 +${ore}` : "";
+      log(state, "good", `击穿深度 ${target.depth}：结构料 +${material}${oreText}。`);
+    }
+    return true;
+  }
+
+  function ascend(state, source) {
+    if (!state.unlocks.mining || state.world.depth <= 0) return false;
+    if (!spendResource(state, "energy", MINING_RULES.verticalMoveEnergy)) return false;
+    state.world.depth -= 1;
+    state.controllers.drive.outputCount += 1;
+    state.controllers.drive.energySpent += MINING_RULES.verticalMoveEnergy;
+    if (source === "manual") {
       log(
         state,
-        "good",
-        hasSalvage
-          ? `回收残骸：能源 +${SALVAGE_REWARD.energy}，材料 +${SALVAGE_REWARD.material}。`
-          : `采集矿材：矿石 +${INDUSTRY_RULES.veinRewardOre}，材料 +${INDUSTRY_RULES.veinRewardMaterial}。`,
+        "info",
+        state.world.depth === 0 ? "已经返回地表。" : `沿竖井上升至深度 ${state.world.depth}。`,
       );
     }
+    return true;
+  }
+
+  function burnWood(state) {
+    if (!state.unlocks.environment || state.clock.paused || state.shutdown) return false;
+    if (state.resources.wood < FOREST_RULES.manualBurnWood) return false;
+    const capacity = RESOURCE_LIMITS.energy - state.resources.energy;
+    if (capacity + 0.0001 < FOREST_RULES.energyPerWood) return false;
+
+    spendResource(state, "wood", FOREST_RULES.manualBurnWood);
+    const gained = FOREST_RULES.energyPerWood;
+    addResource(state, "energy", gained);
+    state.milestones.fuelBurns += 1;
+    log(state, "good", `投入 ${FOREST_RULES.manualBurnWood} 木材，能源 +${formatAmount(gained)}。`);
     return true;
   }
 
@@ -531,7 +663,7 @@
     const definition = CONTROLLERS[id];
     const controller = state.controllers[id];
     if (!definition || !controller?.available || controller.installed) return false;
-    if (!spendResource(state, "material", definition.materialCost)) return false;
+    if (!spendDefinitionCost(state, definition)) return false;
 
     controller.installed = true;
     controller.mode = "preset";
@@ -546,14 +678,22 @@
 
   function setControllerMode(state, id, mode) {
     const controller = state.controllers[id];
-    if (!controller?.installed || !["preset", "ladder"].includes(mode)) return false;
+    if (!controller?.installed || !["manual", "preset", "ladder"].includes(mode)) {
+      return false;
+    }
     controller.mode = mode;
     controller.intervalMs = 0;
     controller.scanMs = 0;
     log(
       state,
       "info",
-      `${CONTROLLERS[id].name}切换为${mode === "preset" ? "预设控制" : "梯形图控制"}。`,
+      `${CONTROLLERS[id].name}切换为${
+        mode === "manual"
+          ? "手动控制，自动化已暂停"
+          : mode === "preset"
+            ? "预设控制"
+            : "梯形图控制"
+      }。`,
     );
     return true;
   }
@@ -561,7 +701,7 @@
   function startJob(state, id) {
     const definition = JOBS[id];
     if (!definition || state.job || !jobAvailable(state, id)) return false;
-    if (!spendResource(state, "material", definition.materialCost)) return false;
+    if (!spendDefinitionCost(state, definition)) return false;
     state.job = {
       id,
       durationMs: definition.durationMs,
@@ -572,8 +712,11 @@
   }
 
   function jobAvailable(state, id) {
+    if (id === "mineHead") {
+      return state.unlocks.workshop && !state.structures.mineHead;
+    }
     if (id === "bench") {
-      return state.unlocks.workshop && !state.structures.bench;
+      return state.structures.mineHead && state.milestones.digs >= 1 && !state.structures.bench;
     }
     if (id === "generator") {
       return state.structures.bench && !state.structures.generator;
@@ -586,7 +729,8 @@
         state.structures.sensor &&
         state.anomaly.revealed &&
         state.anomaly.samples < 3 &&
-        state.world.position === TRACK.anomaly
+        state.world.position === TRACK.anomaly &&
+        state.world.depth === TRACK.anomalyDepth
       );
     }
     if (id === "processor") {
@@ -606,6 +750,12 @@
 
     const id = state.job.id;
     state.job = null;
+    if (id === "mineHead") {
+      state.structures.mineHead = true;
+      state.unlocks.mining = true;
+      state.stage = "mining";
+      log(state, "good", "简易掘进头完成。环境模型已经扩展为可向下开挖的二维剖面。");
+    }
     if (id === "bench") {
       state.structures.bench = true;
       state.stage = "workshop";
@@ -613,7 +763,7 @@
     }
     if (id === "generator") {
       state.structures.generator = true;
-      log(state, "good", "热差发电器开始输出稳定能源。");
+      log(state, "good", "木气化炉投入使用。能源偏低时会自动消耗木材供能。");
     }
     if (id === "sensor") {
       state.structures.sensor = true;
@@ -627,9 +777,8 @@
         state.anomaly.confirmed = true;
         state.unlocks.anomaly = true;
         state.stage = "anomaly";
-        activateVeins(state);
         log(state, "good", "三次采样一致：残阵输出持续大于可测物理输入。");
-        log(state, "info", "矿脉在轨道上出现。继续工业化，为制造灵气接口准备材料。");
+        log(state, "info", "地下矿石可以进入标准化加工，为制造灵气接口准备部件。");
       } else {
         log(state, "warn", `异常样本 ${state.anomaly.samples}/3 已记录。`);
       }
@@ -649,16 +798,25 @@
   function applyDerivedUnlocks(state) {
     if (state.milestones.manualHeartbeats >= 3) state.controllers.heart.available = true;
     if (state.milestones.manualMoves >= 3) state.controllers.drive.available = true;
-    if (state.milestones.pickups >= 1) {
+    if (state.milestones.chops >= 1) {
       state.controllers.pickup.available = true;
       state.unlocks.workshop = true;
     }
+    if (
+      state.structures.mineHead ||
+      state.milestones.digs >= 1 ||
+      state.structures.bench ||
+      state.anomaly.revealed
+    ) {
+      state.structures.mineHead = true;
+      state.unlocks.mining = true;
+    }
+    if (state.milestones.digs >= 1) state.controllers.excavator.available = true;
     if (state.resources.core >= 75 || state.stage !== "recovery") {
       state.unlocks.environment = true;
     }
     if (state.anomaly.confirmed) {
       state.unlocks.anomaly = true;
-      activateVeins(state);
     }
   }
 
@@ -672,8 +830,19 @@
     return true;
   }
 
+  function spendDefinitionCost(state, definition) {
+    const cost = definition?.cost;
+    if (!cost || cost.amount <= 0) return true;
+    if (!Object.hasOwn(state.resources, cost.resource)) return false;
+    return spendResource(state, cost.resource, cost.amount);
+  }
+
   function clampResource(resource, value) {
     return Math.min(RESOURCE_LIMITS[resource], Math.max(0, value));
+  }
+
+  function formatAmount(value) {
+    return Number.isInteger(value) ? String(value) : value.toFixed(1);
   }
 
   function atBoundary(state) {
@@ -681,35 +850,86 @@
     return next < 0 || next >= TRACK.length;
   }
 
-  function salvageAtPosition(state) {
-    return state.world.salvage.includes(state.world.position);
+  function treeAtPosition(state) {
+    return state.world.depth === 0 && state.world.trees.includes(state.world.position);
   }
 
-  function veinAtPosition(state) {
-    return state.world.veins.includes(state.world.position);
+  function harvestAvailable(state) {
+    return treeAtPosition(state);
   }
 
-  function pickupAvailable(state) {
-    return salvageAtPosition(state) || veinAtPosition(state);
+  function mineCellKey(position, depth) {
+    return `${position}:${depth}`;
   }
 
-  function activateVeins(state) {
-    for (const position of INDUSTRY_RULES.veinPositions) {
-      if (!state.world.veins.includes(position)) state.world.veins.push(position);
-      delete state.world.veinRespawn[position];
+  function parseMineCellKey(key) {
+    const [position, depth] = String(key).split(":").map(Number);
+    return { position, depth };
+  }
+
+  function validMineCellKey(key) {
+    const { position, depth } = parseMineCellKey(key);
+    return (
+      Number.isInteger(position) &&
+      Number.isInteger(depth) &&
+      position >= 0 &&
+      position < TRACK.length &&
+      depth >= 1 &&
+      depth <= MINING_RULES.maxDepth &&
+      key === mineCellKey(position, depth)
+    );
+  }
+
+  function cellExcavated(state, position, depth) {
+    return depth === 0 || state.world.excavated.includes(mineCellKey(position, depth));
+  }
+
+  function oreAtCell(position, depth) {
+    return MINING_RULES.oreByCell[mineCellKey(position, depth)] ?? 0;
+  }
+
+  function digTarget(state) {
+    if (state.world.depth >= MINING_RULES.maxDepth) return null;
+    return {
+      position: state.world.position,
+      depth: state.world.depth + 1,
+    };
+  }
+
+  function canDigDown(state) {
+    if (!state.unlocks.mining || !state.structures.mineHead || state.shutdown) return false;
+    const target = digTarget(state);
+    if (!target) return false;
+    const energy = cellExcavated(state, target.position, target.depth)
+      ? MINING_RULES.verticalMoveEnergy
+      : MINING_RULES.digEnergy;
+    return state.resources.energy + 0.0001 >= energy;
+  }
+
+  function digProgress(state) {
+    const target = digTarget(state);
+    if (!target || cellExcavated(state, target.position, target.depth)) {
+      return { current: 0, required: 0, ratio: 0, open: Boolean(target) };
     }
+    const current = state.world.digProgress[mineCellKey(target.position, target.depth)] ?? 0;
+    const required = MINING_RULES.hardnessByDepth[target.depth];
+    return { current, required, ratio: current / required, open: false };
   }
 
-  function advanceVeins(state, deltaMs) {
-    if (!state.anomaly.confirmed) return;
-    for (const position of INDUSTRY_RULES.veinPositions) {
-      if (state.world.veins.includes(position)) continue;
-      const remaining = (state.world.veinRespawn[position] ?? 0) - deltaMs;
+  function nextTreeRespawnMs(state) {
+    const timers = Object.values(state.world.treeRespawn).filter((value) => value > 0);
+    return timers.length > 0 ? Math.min(...timers) : 0;
+  }
+
+  function advanceTrees(state, deltaMs) {
+    for (const position of TRACK.trees) {
+      if (state.world.trees.includes(position)) continue;
+      const remaining = (state.world.treeRespawn[position] ?? 0) - deltaMs;
       if (remaining <= 0) {
-        state.world.veins.push(position);
-        delete state.world.veinRespawn[position];
+        state.world.trees.push(position);
+        delete state.world.treeRespawn[position];
       } else {
-        state.world.veinRespawn[position] = remaining;
+        state.world.treeRespawn[position] = remaining;
       }
     }
   }
@@ -742,13 +962,23 @@
         : "机体处于低功耗停机，等待应急热差电容回充。";
     }
     if (!state.unlocks.environment) return "手动释放三次核心脉冲，让机体恢复响应。";
-    if (state.milestones.pickups === 0) return "沿一维轨道移动，在残骸位置执行拾取。";
-    if (!state.structures.bench) return "用回收材料搭建基础维修台。";
-    if (!state.structures.generator) return "修复热差发电器，建立稳定的物理供能。";
+    if (state.milestones.chops === 0) return "沿森林地表移动，找到成熟树木并完成第一次伐木。";
+    if (state.milestones.fuelBurns === 0 && !state.structures.bench) {
+      return "燃烧一份木材补充能源，再决定多少木材留作建设。";
+    }
+    if (!state.structures.mineHead) return "继续伐木，用木材装配简易掘进头。";
+    if (state.milestones.digs === 0) return "选择一个地表位置，向下击穿第一层岩体。";
+    if (!state.structures.bench) return "继续向下挖掘，取得足够结构料搭建基础维修台。";
+    if (!state.structures.generator) return "搭建木气化炉，让木材可以自动转化为能源。";
     if (!state.structures.sensor) return "修复频谱传感器，检查环境中的未知输出。";
-    if (!state.anomaly.confirmed) return "对残阵完成三次独立采样，排除传感器误差。";
-    if (state.milestones.orePickups === 0) {
-      return "非守恒输出已经确认。矿脉已在轨道出现，采集矿石建立稳定的原料来源。";
+    if (!state.anomaly.confirmed) {
+      if (
+        state.world.position !== TRACK.anomaly ||
+        state.world.depth !== TRACK.anomalyDepth
+      ) {
+        return `频谱信号来自横向 ${TRACK.anomaly}、深度 ${TRACK.anomalyDepth}。开掘通道抵达现场。`;
+      }
+      return "对地下残阵完成三次独立采样，排除传感器误差。";
     }
     if (!state.structures.processor) {
       return "搭建部件加工台，把矿石加工成标准部件。";
@@ -758,8 +988,13 @@
 
   function stageProgress(state) {
     if (state.stage === "recovery") return state.milestones.manualHeartbeats / 3;
-    if (state.stage === "survival") return state.milestones.pickups / TRACK.salvage.length;
+    if (state.stage === "survival") {
+      return (
+        Math.min(2, state.milestones.chops) + Math.min(1, state.milestones.fuelBurns)
+      ) / 3;
+    }
     if (state.stage === "stabilization") return state.structures.bench ? 1 : 0.4;
+    if (state.stage === "mining") return Math.min(1, state.milestones.digs / 2);
     if (state.stage === "workshop") {
       return (Number(state.structures.generator) + Number(state.structures.sensor)) / 2;
     }
@@ -780,8 +1015,13 @@
     objective,
     stageProgress,
     atBoundary,
-    salvageAtPosition,
-    veinAtPosition,
-    pickupAvailable,
+    treeAtPosition,
+    harvestAvailable,
+    nextTreeRespawnMs,
+    cellExcavated,
+    oreAtCell,
+    digTarget,
+    canDigDown,
+    digProgress,
   });
 })(globalThis);
