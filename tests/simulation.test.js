@@ -1,4 +1,5 @@
 const assert = require("node:assert/strict");
+const { test } = require("bun:test");
 
 require("../src/data.js");
 require("../src/inner-landscape.js");
@@ -144,6 +145,15 @@ function testOpeningRouteBudget() {
 
 function testInitialRecovery() {
   const state = Simulation.createState();
+  assert.deepEqual(state.origin, {
+    id: "kerrBlackHole",
+    name: "克尔黑洞取能环",
+    memory: "引力与时空数据",
+    accident: "取能系统意外从黑洞附近提取出不属于本宇宙的状态。",
+    openingViewed: false,
+    openingCompletedAtMs: null,
+    pausedBeforeOpening: null,
+  });
   assert.deepEqual(state.resources, {
     core: 25,
     energy: 30,
@@ -162,6 +172,33 @@ function testInitialRecovery() {
   assert.equal(state.unlocks.environment, true);
   assert.equal(state.controllers.heart.available, true);
   assert.equal(state.stage, "survival");
+}
+
+function testOpeningOriginPersistence() {
+  const state = Simulation.createState();
+  assert.equal(Simulation.performAction(state, "completeOpening"), true);
+  assert.equal(state.origin.openingViewed, true);
+  assert.equal(state.origin.openingCompletedAtMs, 0);
+  assert.equal(state.origin.pausedBeforeOpening, null);
+  assert.equal(
+    Simulation.performAction(state, "completeOpening"),
+    false,
+    "opening completion should be idempotent",
+  );
+
+  const loaded = Simulation.normalizeState(JSON.parse(JSON.stringify(state)));
+  assert.equal(loaded.origin.id, "kerrBlackHole");
+  assert.equal(loaded.origin.openingViewed, true);
+  assert.equal(loaded.origin.memory, "引力与时空数据");
+
+  const oldV2 = Simulation.createState();
+  delete oldV2.origin;
+  const migrated = Simulation.normalizeState(JSON.parse(JSON.stringify(oldV2)));
+  assert.equal(
+    migrated.origin.openingViewed,
+    true,
+    "existing v2 saves should not be interrupted by the new opening",
+  );
 }
 
 function testForestFuelLoop() {
@@ -659,21 +696,20 @@ function testIndustryStatePersistence() {
   assert.equal(migrated.unlocks.mining, true);
 }
 
-testInitialRecovery();
-testForestFuelLoop();
-testOpeningRouteBudget();
-testWoodGenerator();
-testBinaryTreeMining();
-testIndustryChapter();
-testInnerAwakeningChapter();
-testIndustryStatePersistence();
-testRecoverableShutdown();
-testLadderOptimizationBenefit();
-testControllerEdgeCases();
-testControllerPauseToManual();
-testFullOpeningSlice();
-testNoImplicitOfflineCatchupAndLegacyArchive();
-testAutomationPlan();
-testLegacyLadderArchive();
-
-console.log("simulation tests passed");
+test("initial recovery unlocks survival", testInitialRecovery);
+test("opening origin completion persists", testOpeningOriginPersistence);
+test("forest fuel loop works", testForestFuelLoop);
+test("opening route stays within the target budget", testOpeningRouteBudget);
+test("wood generator consumes wood over time", testWoodGenerator);
+test("binary mining tree progresses deterministically", testBinaryTreeMining);
+test("industry chapter unlocks and processes ore", testIndustryChapter);
+test("inner awakening chapter remains deterministic", testInnerAwakeningChapter);
+test("industry state normalizes persisted world data", testIndustryStatePersistence);
+test("shutdown is recoverable", testRecoverableShutdown);
+test("ladder control reduces automation cost", testLadderOptimizationBenefit);
+test("controller edge cases stay bounded", testControllerEdgeCases);
+test("controller can pause to manual and resume ladder", testControllerPauseToManual);
+test("current opening slice reaches confirmed anomaly", testFullOpeningSlice);
+test("normalization has no implicit offline catch-up", testNoImplicitOfflineCatchupAndLegacyArchive);
+test("automation plan is declarative", testAutomationPlan);
+test("legacy ladder program is archived", testLegacyLadderArchive);

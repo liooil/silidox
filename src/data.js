@@ -6,6 +6,15 @@
   const LADDER_STORAGE_KEY = "silidox.ladder.v3";
   const LEGACY_LADDER_STORAGE_KEY = "silidox.ladder.v2";
 
+  const OPENING_ORIGINS = {
+    kerrBlackHole: {
+      id: "kerrBlackHole",
+      name: "克尔黑洞取能环",
+      memory: "引力与时空数据",
+      accident: "取能系统意外从黑洞附近提取出不属于本宇宙的状态。",
+    },
+  };
+
   const RESOURCE_LIMITS = {
     core: 100,
     energy: 100,
@@ -326,6 +335,7 @@
     LEGACY_META_STORAGE_KEY,
     LADDER_STORAGE_KEY,
     LEGACY_LADDER_STORAGE_KEY,
+    OPENING_ORIGINS,
     RESOURCE_LIMITS,
     STARTING_RESOURCES,
     TRACK,

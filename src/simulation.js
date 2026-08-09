@@ -7,6 +7,7 @@
     INNER_RULES,
     JOBS,
     MINING_RULES,
+    OPENING_ORIGINS,
     RESEARCH_MODEL,
     RESOURCE_LIMITS,
     STARTING_RESOURCES,
@@ -17,6 +18,7 @@
   function createState(legacyArchive = null) {
     return {
       version: 2,
+      origin: createOriginState(false),
       stage: "recovery",
       clock: {
         elapsedMs: 0,
@@ -99,6 +101,7 @@
       shutdown: false,
       legacyArchive,
       logs: [
+        createLog("info", "损坏前最后可恢复记录：克尔黑洞取能环。", 0),
         createLog("warn", "核心循环尚未稳定。释放三次手动脉冲以恢复机体。", 0),
         createLog("info", "当前只能读取最低限度的机体状态。", 0),
       ],
@@ -112,6 +115,19 @@
           index * FOREST_RULES.initialTreeGrowthStepMs,
       ]),
     );
+  }
+
+  function createOriginState(openingViewed) {
+    const origin = OPENING_ORIGINS.kerrBlackHole;
+    return {
+      id: origin.id,
+      name: origin.name,
+      memory: origin.memory,
+      accident: origin.accident,
+      openingViewed: Boolean(openingViewed),
+      openingCompletedAtMs: null,
+      pausedBeforeOpening: null,
+    };
   }
 
   function createControllerState(id) {
@@ -134,6 +150,7 @@
     }
 
     const base = createState(value.legacyArchive ?? legacyArchive);
+    base.origin = normalizeOriginState(value.origin);
     base.stage = typeof value.stage === "string" ? value.stage : base.stage;
     base.clock.elapsedMs = finite(value.clock?.elapsedMs, 0, Number.MAX_SAFE_INTEGER);
     base.clock.paused = Boolean(value.clock?.paused);
@@ -333,6 +350,23 @@
 
     applyDerivedUnlocks(base);
     return base;
+  }
+
+  function normalizeOriginState(value) {
+    if (!value || typeof value !== "object") {
+      return createOriginState(true);
+    }
+    const isKnownOrigin = value.id === OPENING_ORIGINS.kerrBlackHole.id;
+    const origin = createOriginState(
+      isKnownOrigin ? Boolean(value.openingViewed) : true,
+    );
+    origin.openingCompletedAtMs =
+      value.openingCompletedAtMs == null
+        ? null
+        : finite(value.openingCompletedAtMs, 0, Number.MAX_SAFE_INTEGER);
+    origin.pausedBeforeOpening =
+      value.pausedBeforeOpening == null ? null : Boolean(value.pausedBeforeOpening);
+    return origin;
   }
 
   function finite(value, min, max) {
@@ -621,6 +655,7 @@
       state.clock.paused = !state.clock.paused;
       return true;
     }
+    if (action === "completeOpening") return completeOpening(state);
     if (action === "emergencyPulse") return emergencyPulse(state);
     if (state.shutdown) return false;
 
@@ -640,6 +675,16 @@
     }
     if (action === "startJob") return startJob(state, payload);
     return false;
+  }
+
+  function completeOpening(state) {
+    if (!state.origin) state.origin = createOriginState(false);
+    if (state.origin.openingViewed) return false;
+    state.origin.openingViewed = true;
+    state.origin.openingCompletedAtMs = state.clock.elapsedMs;
+    state.origin.pausedBeforeOpening = null;
+    log(state, "info", "巨构施工记录已归档：保留引力与时空数据残片。");
+    return true;
   }
 
   function manualHeartbeat(state) {

@@ -14,11 +14,14 @@ Silidox（硅基问道）是一个以修仙为主题的增量游戏。主角是�
 
 ## Running
 
-```bash
-bun index.html
+直接用浏览器打开仓库中的 HTML 文件，例如：
+
+```text
+file:///home/xiteng/src/silidox/index.html
+file:///home/xiteng/src/silidox/debug/kerr-opening.html
 ```
 
-然后打开 `http://localhost:3000`。也可以直接打开 `index.html`；必须保持 `file://` 工作流可用。
+不要为了运行、调试或查看 WebGPU 场景启动 `bun index.html`、本地 HTTP 服务或任何监听端口。Firefox 的 `file:///` 页面可以使用 WebGPU；必须保持这个工作流可用。
 
 源码仓库本身就是发布物，不假设存在 `dist` 或部署构建。
 
@@ -28,6 +31,13 @@ bun index.html
 index.html
   -> styles.css
   -> src/data.js
+  -> src/renderer/kerr/grid-background.js
+  -> src/renderer/kerr/kerr-lens.js
+  -> src/renderer/kerr/ring-direct.js
+  -> src/renderer/kerr/energy-flow.js
+  -> src/renderer/kerr/post-process.js
+  -> src/renderer/kerr/kerr-scene.js
+  -> src/opening-kerr.js
   -> src/simulation.js
   -> src/inner-landscape.js
   -> src/ladder-editor.js
@@ -48,6 +58,24 @@ index.html
 - 存档与程序键名
 
 不要在此读取 DOM、localStorage 或运行模拟。
+
+### `src/opening-kerr.js`
+
+克尔黑洞取能环开场：
+
+- 负责开场 DOM、生命周期、时间轴和视觉状态；
+- 通过 `src/renderer/kerr/` 下的多 pass WebGPU Render Graph 渲染旋转黑洞、吸积盘、光子环、取能环建设和能流校准；
+- 在 WebGPU 不可用时只显示建设记录文字状态，保持直接打开 `index.html` 可用，不维护低保真画布降级；
+- 只负责开场层和视觉状态，不推进确定性模拟。
+
+### `src/renderer/kerr/`
+
+- `grid-background.js`：生成并维护透镜校验用二维网格源画布，上传为 WebGPU 纹理；
+- `kerr-lens.js`：Schwarzschild 轨道方程反向追迹基线、吸积盘、磁层和远侧工程环透镜像；Kerr 自旋修正必须保持明确边界；
+- `ring-direct.js`：前景平台栅格化；旧工程环直接像 shader 不接入正式 Render Graph；
+- `energy-flow.js`：compute 驱动的环段状态和输能 ribbon；沿环直接投影的施工单元暂不显示；
+- `post-process.js`：HDR Bloom、曝光和 tone mapping；
+- `kerr-scene.js`：Render Graph、WebGPU 资源生命周期和最终帧读回；工程环只通过透镜 pass 显示。
 
 ### `src/simulation.js`
 
@@ -125,6 +153,15 @@ index.html
 - 连接模拟、梯形图和 UI
 - 导出自动化计划
 
+## Debug Pages
+
+`debug/` 存放直接文件访问可用的场景调试页：
+
+- `debug/index.html` 是调试场景入口；
+- `debug/kerr-opening.html` 复用 `src/data.js` 与 `src/opening-kerr.js` 调试克尔黑洞取能环开场。
+
+调试页不得引入框架、构建步骤或模块脚本。它们可以构造临时状态，但不要读取或写入正式存档，除非页面目的就是测试存档迁移。新增调试页时优先复用 `src/` 中的场景、模拟或 UI 模块，不要复制正式玩法逻辑。
+
 ## Progression Rules
 
 - 开局先手动心跳，再解锁环境和自动化。
@@ -171,20 +208,13 @@ index.html
 ## Verification
 
 ```bash
-node --check src/data.js
-node --check src/simulation.js
-node --check src/inner-landscape.js
-node --check src/ladder-editor.js
-node --check src/automation-plan.js
-node --check src/ui.js
-node --check src/app.js
-node tests/simulation.test.js
-node tests/inner-landscape.test.js
-node tests/direct-file.test.js
+bun test
 git diff --check
 ```
 
-手动验证应同时覆盖直接打开 `index.html` 与 `bun index.html`：
+`bun test` 覆盖经典脚本语法检查、直接文件结构检查、模拟内核和内景内核测试。不要用 `node --check` 或 `node tests/...` 作为本项目的默认验证口径。
+
+手动验证应覆盖直接用 `file:///` 打开正式页和调试页：
 
 - 三次手动心跳解锁环境
 - 停机后应急恢复且不丢进度
@@ -193,4 +223,5 @@ git diff --check
 - 控制器安装、预设运行与梯形图接管
 - 工坊建设进度和残阵三次采样
 - 梯形图点击、拖放、重排和整体滚动
+- `debug/kerr-opening.html` 中克尔黑洞取能环建设画面可直接播放
 - 桌面与移动端无文字或控件重叠

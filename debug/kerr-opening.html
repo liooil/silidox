@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Silidox 调试：克尔黑洞取能环</title>
+    <link rel="stylesheet" href="../styles.css" />
+    <link rel="stylesheet" href="./debug.css" />
+  </head>
+  <body class="debug-page debug-kerr-page">
+    <main class="debug-stage-shell">
+      <header class="debug-toolbar" aria-label="调试控制">
+        <a class="debug-link" href="./index.html">调试场景</a>
+        <a class="debug-link" href="../index.html">返回游戏</a>
+        <button id="replayOpeningBtn">正式播放</button>
+        <span id="debugRuntimeStatus">等待场景。</span>
+      </header>
+
+      <section class="debug-afterview" aria-labelledby="debugSceneTitle">
+        <span>地球人类巨构工程 / 引力与时空数据</span>
+        <h1 id="debugSceneTitle">克尔黑洞取能环</h1>
+        <p>当前页面使用正式开场模块渲染取能环建设过程，不经过游戏存档、阶段推进或本地存储。</p>
+      </section>
+    </main>
+
+    <details class="debug-render-inspector" open>
+      <summary>
+        <strong>渲染检验</strong>
+        <output id="debugTimelineSummary">T+00.00 / 施工 100%</output>
+      </summary>
+
+      <div class="debug-render-controls">
+        <div class="debug-transport" aria-label="时间轴控制">
+          <button id="debugPlayPauseBtn" type="button">暂停</button>
+          <button id="debugStepBtn" type="button">+1 帧</button>
+          <div class="debug-speed" role="group" aria-label="播放速度">
+            <button type="button" data-debug-speed="0.25">0.25x</button>
+            <button type="button" data-debug-speed="1" class="active">1x</button>
+            <button type="button" data-debug-speed="4">4x</button>
+          </div>
+        </div>
+
+        <label class="debug-range-control" for="debugTimeRange">
+          <span>动画时间 <output id="debugTimeOutput">00.00 s</output></span>
+          <input id="debugTimeRange" type="range" min="0" max="30" step="0.016667" value="0" />
+        </label>
+
+        <label class="debug-range-control" for="debugProgressRange">
+          <span>施工进度 <output id="debugProgressOutput">100%</output></span>
+          <input id="debugProgressRange" type="range" min="0" max="1" step="0.01" value="1" />
+        </label>
+
+        <label class="debug-check-control" for="debugTracerToggle">
+          <input id="debugTracerToggle" type="checkbox" />
+          <span>物质示踪</span>
+        </label>
+
+        <div class="debug-capture-actions">
+          <button id="debugCaptureFrameBtn" type="button">导出 PNG</button>
+          <button id="debugRecordBtn" type="button">录制 6 秒</button>
+          <button id="debugPixelCheckBtn" type="button">像素检查</button>
+        </div>
+
+        <output class="debug-diagnostic-output" id="debugDiagnosticOutput">等待检验。</output>
+
+        <div class="debug-capture-result" id="debugCaptureResult" hidden>
+          <a id="debugCaptureDownload" class="debug-link" download="silidox-kerr-capture.tar">下载最近检验包</a>
+        </div>
+
+        <div class="debug-recording-result" id="debugRecordingResult" hidden>
+          <video id="debugRecordingPreview" controls loop muted playsinline></video>
+          <a id="debugRecordingDownload" class="debug-link" download="silidox-kerr-debug.webm">下载 WebM</a>
+        </div>
+      </div>
+    </details>
+
+    <script src="../src/data.js"></script>
+    <script src="../src/renderer/kerr/grid-background.js"></script>
+    <script src="../src/renderer/kerr/kerr-lens.js"></script>
+    <script src="../src/renderer/kerr/ring-direct.js"></script>
+    <script src="../src/renderer/kerr/energy-flow.js"></script>
+    <script src="../src/renderer/kerr/post-process.js"></script>
+    <script src="../src/renderer/kerr/kerr-scene.js"></script>
+    <script src="../src/opening-kerr.js"></script>
+    <script src="./render-capture.js"></script>
+    <script src="./kerr-opening.js"></script>
+  </body>
+</html>

@@ -1,4 +1,5 @@
 const assert = require("node:assert/strict");
+const { test } = require("bun:test");
 
 require("../src/inner-landscape.js");
 
@@ -134,12 +135,10 @@ function testPauseAndControlBounds() {
   assert.equal(inner.external.pressure, 300, "external pressure must clamp");
 }
 
-testBaselineQuietRunsStable();
-testOverpressureFaultAndRelief();
-testOverheatFaultInBurst();
-testPollutionFaultAndPurge();
-testOscillationFault();
-testDeterministicReplay();
-testPauseAndControlBounds();
-
-console.log("inner landscape tests passed");
+test("baseline quiet circuit runs stable", testBaselineQuietRunsStable);
+test("overpressure fault can be relieved", testOverpressureFaultAndRelief);
+test("burst mode can overheat", testOverheatFaultInBurst);
+test("pollution fault can be purged", testPollutionFaultAndPurge);
+test("oscillation fault is detected", testOscillationFault);
+test("inner landscape replay is deterministic", testDeterministicReplay);
+test("pause and control bounds are enforced", testPauseAndControlBounds);

@@ -6,11 +6,14 @@
 
 Silidox 使用原生 HTML、CSS 和 JavaScript。不要引入 React、Vue、Svelte、Angular、打包器、转译器、运行时包依赖或必须存在的 `package.json`。
 
-直接打开 `index.html` 必须可以游玩。开发时也可以运行：
+直接打开 `index.html` 必须可以游玩。正式页和调试页都以 `file:///` 为默认运行方式，例如：
 
-```bash
-bun index.html
+```text
+file:///home/xiteng/src/silidox/index.html
+file:///home/xiteng/src/silidox/debug/kerr-opening.html
 ```
+
+当前网页项目不需要本地 HTTP 服务，不应为了查看游戏或 WebGPU 调试场景启动 `bun index.html` 或任何监听端口。Firefox 的 `file:///` 页面可以使用 WebGPU；WebGPU 不可用时只显示文字状态。
 
 源码仓库本身就是发布物，不生成 `dist`，不依赖 CDN，也不要求部署流水线。
 
@@ -20,6 +23,13 @@ bun index.html
 index.html
   -> styles.css
   -> src/data.js
+  -> src/renderer/kerr/grid-background.js
+  -> src/renderer/kerr/kerr-lens.js
+  -> src/renderer/kerr/ring-direct.js
+  -> src/renderer/kerr/energy-flow.js
+  -> src/renderer/kerr/post-process.js
+  -> src/renderer/kerr/kerr-scene.js
+  -> src/opening-kerr.js
   -> src/simulation.js
   -> src/inner-landscape.js
   -> src/ladder-editor.js
@@ -31,12 +41,40 @@ index.html
 所有文件继续使用经典脚本，并通过明确的 `Silidox*` 全局命名空间协作。
 
 - `src/data.js`：静态资源、森林与地下二叉矿路、建设、控制器与设备 I/O 定义；不读取存档或 DOM。
+- `src/renderer/kerr/grid-background.js`：生成用于校验透镜映射的二维网格源画布；画布上传为 WebGPU 纹理，不作为 Canvas 渲染降级。
+- `src/renderer/kerr/kerr-lens.js`：采样网格源平面，并以 Schwarzschild 无量纲轨道方程建立稳定的反向光线追迹基线；负责黑洞阴影、吸积盘、磁层和远侧工程环的多重透镜像，不绘制直接实体。Kerr 自旋修正必须在该基线上独立实现，不能重新使用固定步数耗尽即捕获的伪积分。
+- `src/renderer/kerr/ring-direct.js`：提供前景平台栅格化；文件中的旧工程环直接像 shader 不接入正式 Render Graph，取能环只允许由透镜 pass 重建。
+- `src/renderer/kerr/energy-flow.js`：compute shader 更新环段闭合状态和外围输能 ribbon，独立 render pass 读取 storage buffer；沿环直接投影的施工单位保持隐藏，直至它们也能进入透镜源模型。
+- `src/renderer/kerr/post-process.js`：从 `rgba16float` 场景提取 Bloom，并统一执行曝光、tone mapping 与显示 gamma。
+- `src/renderer/kerr/kerr-scene.js`：组织 compute、网格源平面、局部透镜、前景、能流、Bloom 和最终合成的 Render Graph，并提供最终帧像素读回；不得增加绕过透镜的工程环直接像 pass。
+- `src/opening-kerr.js`：只负责克尔黑洞取能环开场的 DOM、生命周期、时间轴与视觉状态；WebGPU 不可用时只显示建设记录文字状态，不维护低保真画布降级，也不推进确定性模拟。
 - `src/simulation.js`：确定性的资源、停机、移动、建设、控制与阶段推进；不访问 DOM 或 localStorage。
 - `src/inner-landscape.js`：内景确定性内核；节点灵流、灵压、温度、杂质、稳定度推进与四类故障检测；不访问 DOM 或 localStorage。
 - `src/ladder-editor.js`：多设备梯形图存储、迁移、编辑、编译、渲染与求值。
 - `src/automation-plan.js`：把设备程序转换成声明式离线执行计划，不包含可执行 JavaScript。
 - `src/ui.js`：DOM 缓存、事件绑定、工作区和诊断界面渲染。
 - `src/app.js`：启动、固定步长时钟、模块编排、存档和下载。
+
+## 调试页面
+
+`debug/` 存放可以直接打开的场景调试页。它们和正式入口一样使用经典脚本与相对路径，不使用模块、框架、打包器或独立构建步骤。
+
+- `debug/index.html`：调试场景入口。
+- `debug/kerr-opening.html`：克尔黑洞取能环开场调试页，复用 `src/data.js` 与 `src/opening-kerr.js`，不读取或写入正式存档。
+- `debug/render-capture.js`：调试场景共享的浏览器侧捕获工具，将 WebGPU 像素读回编码为 PNG，并把 PNG 或 WebM 与 `capture.json` 清单封装为无压缩 TAR。
+- `debug/capture-kerr.sh`：使用独立 Firefox 配置直接打开 `file:///` 调试页，将自动下载目录固定到 `/tmp/silidox-captures`，等待 TAR 落盘后解包；不启动 HTTP 服务、远程调试端口或其他网络监听器。
+
+调试页可以构造专用的临时状态，但不能复制正式模拟逻辑。场景 DOM、渲染器和玩法内核应优先从 `src/` 复用；需要新增场景时，先把可复用部分做成普通全局命名空间模块，再由正式入口和调试页共同加载。
+
+渲染捕获通过查询参数固定时间、施工进度、示踪模式和输出尺寸。单帧使用 WebGPU `COPY_SRC` 读回后编码为 PNG，动态效果使用 `canvas.captureStream()` 与 `MediaRecorder` 录制 WebM。浏览器页面不连接 Unix socket；最终 TAR 文件由 Firefox 下载到已知目录，其从 `.part` 重命名为正式文件即作为捕获完成信号。
+
+```bash
+# T+12 秒、施工 100%、关闭物质示踪的单帧
+./debug/capture-kerr.sh frame 12 1 0
+
+# T+12 秒开始、施工 100%、录制 6 秒、1 倍速、关闭物质示踪
+./debug/capture-kerr.sh video 12 1 6 1 0
+```
 
 ## 游戏系统边界
 
@@ -133,6 +171,8 @@ Silidox 不分别实现互不相干的修炼、工厂、战斗和争霸运行时
 架构调整必须继续满足：
 
 - 直接打开 `index.html`
+- 直接打开 `debug/*.html`
+- 不启动本地 HTTP 服务或任何监听端口
 - 无构建步骤、无框架依赖
 - 源码仓库直接发布
 - 浏览器端无本地执行器时仍可完整在线游玩

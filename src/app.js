@@ -11,10 +11,12 @@
   const Simulation = global.SilidoxSimulation;
   const Ladder = global.SilidoxLadder;
   const AutomationPlan = global.SilidoxAutomationPlan;
+  const Opening = global.SilidoxOpening;
 
   let state = loadState();
   let saveAccumulator = 0;
   let ui;
+  let opening;
 
   ui = global.SilidoxUI.create({
     onPrimaryAction() {
@@ -45,8 +47,29 @@
     },
   });
 
+  opening = Opening?.create({
+    getState: () => state,
+    onStart({ restorePause }) {
+      state.origin.pausedBeforeOpening = Boolean(restorePause);
+      state.clock.paused = true;
+      saveState();
+      render();
+    },
+    onComplete({ restorePause }) {
+      const pausedBeforeOpening =
+        state.origin.pausedBeforeOpening == null
+          ? Boolean(restorePause)
+          : Boolean(state.origin.pausedBeforeOpening);
+      Simulation.performAction(state, "completeOpening");
+      state.clock.paused = pausedBeforeOpening;
+      saveState();
+      render();
+    },
+  });
+
   saveState();
   render();
+  maybeStartOpening();
   global.setInterval(runStep, STEP_MS);
   global.addEventListener("beforeunload", saveState);
 
@@ -137,6 +160,7 @@
     saveState();
     ui.selectWorkspace("body");
     render();
+    maybeStartOpening();
   }
 
   function clearNewSave() {
@@ -150,6 +174,10 @@
     localStorage.removeItem(SAVE_STORAGE_KEY);
     localStorage.removeItem(LADDER_STORAGE_KEY);
     global.location.reload();
+  }
+
+  function maybeStartOpening() {
+    opening?.showIfNeeded();
   }
 
   function exportAutomationPlan() {
