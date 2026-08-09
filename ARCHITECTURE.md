@@ -30,7 +30,7 @@ index.html
 
 所有文件继续使用经典脚本，并通过明确的 `Silidox*` 全局命名空间协作。
 
-- `src/data.js`：静态资源、森林与地下二维剖面、建设、控制器与设备 I/O 定义；不读取存档或 DOM。
+- `src/data.js`：静态资源、森林与地下二叉矿路、建设、控制器与设备 I/O 定义；不读取存档或 DOM。
 - `src/simulation.js`：确定性的资源、停机、移动、建设、控制与阶段推进；不访问 DOM 或 localStorage。
 - `src/inner-landscape.js`：内景确定性内核；节点灵流、灵压、温度、杂质、稳定度推进与四类故障检测；不访问 DOM 或 localStorage。
 - `src/ladder-editor.js`：多设备梯形图存储、迁移、编辑、编译、渲染与求值。

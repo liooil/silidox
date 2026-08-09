@@ -1,6 +1,7 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
+const vm = require("node:vm");
 
 const root = path.resolve(__dirname, "..");
 const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
@@ -21,10 +22,15 @@ assert.deepEqual(scriptSources, [
 assert.equal(/type\s*=\s*["']module["']/.test(html), false);
 
 for (const source of scriptSources) {
+  const resolved = path.resolve(root, source);
   assert.equal(
-    fs.existsSync(path.resolve(root, source)),
+    fs.existsSync(resolved),
     true,
     `missing direct-file script: ${source}`,
+  );
+  assert.doesNotThrow(
+    () => new vm.Script(fs.readFileSync(resolved, "utf8"), { filename: resolved }),
+    `invalid direct-file script syntax: ${source}`,
   );
 }
 

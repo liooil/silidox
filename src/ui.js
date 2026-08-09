@@ -4,6 +4,7 @@
     CONTROLLERS,
     CONTROL_CONTEXTS,
     FOREST_RULES,
+    INNER_RULES,
     JOBS,
     MINING_RULES,
     RESOURCE_LIMITS,
@@ -32,10 +33,17 @@
       els.heartbeatBtn.addEventListener("pointerdown", () => handlers.onPrimaryAction());
       els.moveBtn.addEventListener("pointerdown", () => handlers.onAction("move"));
       els.reverseBtn.addEventListener("pointerdown", () => handlers.onAction("reverse"));
-      els.pickupBtn.addEventListener("pointerdown", () => handlers.onAction("harvest"));
+      els.pickupBtn.addEventListener("pointerdown", () => handlers.onAction("pickup"));
       els.burnWoodBtn.addEventListener("pointerdown", () => handlers.onAction("burnWood"));
-      els.digBtn.addEventListener("pointerdown", () => handlers.onAction("digDown"));
+      els.digLeftBtn.addEventListener("pointerdown", () => handlers.onAction("digLeft"));
+      els.digRightBtn.addEventListener("pointerdown", () => handlers.onAction("digRight"));
       els.ascendBtn.addEventListener("pointerdown", () => handlers.onAction("ascend"));
+      els.innerPulseBtn.addEventListener("pointerdown", () => handlers.onAction("innerPulse"));
+      els.mineTree.addEventListener("pointerdown", (event) => {
+        const branch = event.target.closest("[data-enter-branch]")?.dataset.enterBranch;
+        if (branch === "L") handlers.onAction("digLeft");
+        if (branch === "R") handlers.onAction("digRight");
+      });
       els.exportPlanBtn.addEventListener("click", handlers.onExportPlan);
       els.restartBtn.addEventListener("click", handlers.onRestart);
       els.newGameBtn.addEventListener("click", handlers.onNewGame);
@@ -114,6 +122,8 @@
       renderBody(state, status);
       renderEnvironment(state, status);
       renderWorkshop(state);
+      renderResearch(state);
+      renderInner(state);
       renderProgramTabs(state, status);
       renderDiagnostics(state, status);
       renderLogs(state);
@@ -149,12 +159,14 @@
       els.environmentTab.hidden = !state.unlocks.environment;
       els.workshopTab.hidden = !state.unlocks.workshop;
       els.anomalyTab.hidden = !state.unlocks.anomaly;
+      els.innerTab.hidden = !state.unlocks.inner;
 
       const unlocked =
         selectedWorkspace === "body" ||
         (selectedWorkspace === "environment" && state.unlocks.environment) ||
         (selectedWorkspace === "workshop" && state.unlocks.workshop) ||
-        (selectedWorkspace === "anomaly" && state.unlocks.anomaly);
+        (selectedWorkspace === "anomaly" && state.unlocks.anomaly) ||
+        (selectedWorkspace === "inner" && state.unlocks.inner);
       if (!unlocked) selectWorkspace("body");
     }
 
@@ -202,28 +214,30 @@
 
     function renderEnvironment(state, status) {
       const miningUnlocked = state.unlocks.mining;
-      const visibleDepth = miningUnlocked ? MINING_RULES.maxDepth : 0;
-      els.environmentTitle.textContent = miningUnlocked ? "森林与地下剖面" : "森林地表";
+      const atMineEntrance =
+        state.world.depth > 0 || state.world.position === TRACK.mineEntrance;
+      els.environmentTitle.textContent = miningUnlocked ? "森林与分支矿井" : "森林地表";
       els.environmentDescription.textContent = miningUnlocked
-        ? "地表负责移动与伐木；选择横向位置向下开掘，沿永久竖井进入更深岩层。"
-        : "地表没有障碍物。移动、掉头并反复伐木，在建设材料与燃料能源之间分配木材。";
-      els.trackEyebrow.textContent = miningUnlocked ? "二维环境观测" : "地表观测";
-      els.trackTitle.textContent = miningUnlocked ? "森林地层剖面" : "林间横断带";
-      els.track.classList.toggle("mining-unlocked", miningUnlocked);
-      els.track.setAttribute(
-        "aria-label",
-        miningUnlocked ? "森林和地下二维剖面" : "森林地表",
-      );
-      const target = Simulation.digTarget(state);
-      const progress = Simulation.digProgress(state);
+        ? "抵达固定矿井入口后，从每个节点选择左下或右下支路。矿路、产出与掘进进度永久保留。"
+        : "初期沿森林地表拾取掉落树枝。成熟树木再生很慢，后续伐木只能作为长期补给。";
+      els.trackEyebrow.textContent = "地表观测";
+      els.trackTitle.textContent = miningUnlocked ? "林间横断带与矿井入口" : "林间横断带";
+      els.track.setAttribute("aria-label", "森林地表");
       const gridKey = environmentGridKey(state);
       if (renderSignatures.get(els.track) !== gridKey) {
         renderSignatures.set(els.track, gridKey);
-        rebuildEnvironmentGrid(state, target, progress, visibleDepth);
+        rebuildSurfaceTrack(state);
+      }
+      const treeKey = mineTreeKey(state);
+      if (renderSignatures.get(els.mineTree) !== treeKey) {
+        renderSignatures.set(els.mineTree, treeKey);
+        rebuildMineTree(state);
       }
 
       els.trackPosition.textContent =
-        `横向 ${state.world.position} · ${state.world.depth === 0 ? "地表" : `深度 ${state.world.depth}`}`;
+        state.world.depth === 0
+          ? `横向 ${state.world.position} · 地表`
+          : `矿路 ${formatMinePath(state.world.minePath)} · 深度 ${state.world.depth}`;
       els.moveBtn.disabled =
         state.shutdown ||
         state.clock.paused ||
@@ -235,13 +249,14 @@
         state.clock.paused ||
         state.world.depth > 0 ||
         state.resources.energy < SURVIVAL_RULES.reverseEnergy;
+      const branchHere = Simulation.branchAtPosition(state);
       const treeHere = Simulation.treeAtPosition(state);
       els.pickupBtn.disabled =
         state.shutdown ||
         state.clock.paused ||
-        !Simulation.harvestAvailable(state) ||
-        state.resources.energy < SURVIVAL_RULES.harvestEnergy;
-      els.pickupBtn.textContent = "伐木";
+        !Simulation.pickupAvailable(state) ||
+        state.resources.energy < SURVIVAL_RULES.pickupEnergy;
+      els.pickupBtn.textContent = branchHere ? "拾取树枝" : treeHere ? "伐木" : "搜集";
       els.burnWoodBtn.disabled =
         state.shutdown ||
         state.clock.paused ||
@@ -249,150 +264,356 @@
         state.resources.energy > RESOURCE_LIMITS.energy - FOREST_RULES.energyPerWood + 0.0001;
       els.burnWoodBtn.textContent =
         `燃烧 ${FOREST_RULES.manualBurnWood} 木材 · +${FOREST_RULES.energyPerWood} 能源`;
-      els.digBtn.hidden = !miningUnlocked;
+      els.digLeftBtn.hidden = !miningUnlocked;
+      els.digRightBtn.hidden = !miningUnlocked;
       els.ascendBtn.hidden = !miningUnlocked;
-      els.digBtn.disabled =
-        state.shutdown || state.clock.paused || !Simulation.canDigDown(state);
-      els.digBtn.textContent = progress.open ? "沿竖井下行" : "向下掘进";
+      const leftProgress = Simulation.mineBranchProgress(state, "L");
+      const rightProgress = Simulation.mineBranchProgress(state, "R");
+      els.digLeftBtn.disabled =
+        state.shutdown || state.clock.paused || !Simulation.canDigBranch(state, "L");
+      els.digRightBtn.disabled =
+        state.shutdown || state.clock.paused || !Simulation.canDigBranch(state, "R");
+      els.digLeftBtn.textContent = leftProgress.open ? "进入左下支路" : "向左下掘进";
+      els.digRightBtn.textContent = rightProgress.open ? "进入右下支路" : "向右下掘进";
       els.ascendBtn.disabled =
         state.shutdown ||
         state.clock.paused ||
         state.world.depth <= 0 ||
         state.resources.energy < MINING_RULES.verticalMoveEnergy;
 
-      els.miningReadout.hidden = !miningUnlocked;
+      els.mineViewport.hidden = !miningUnlocked;
       if (miningUnlocked) {
-        if (!target) {
-          els.miningTarget.textContent = "已达当前极限深度";
-          els.miningProgressText.textContent = `${MINING_RULES.maxDepth} / ${MINING_RULES.maxDepth}`;
-          els.miningProgressBar.style.width = "100%";
-        } else if (progress.open) {
-          els.miningTarget.textContent = `下方通道 · 横向 ${target.position} / 深度 ${target.depth}`;
-          els.miningProgressText.textContent = "已开通";
-          els.miningProgressBar.style.width = "100%";
-        } else {
-          els.miningTarget.textContent = `目标岩层 · 横向 ${target.position} / 深度 ${target.depth}`;
-          els.miningProgressText.textContent = `${progress.current} / ${progress.required}`;
-          els.miningProgressBar.style.width = `${progress.ratio * 100}%`;
-        }
+        els.minePathReadout.textContent = formatMinePath(state.world.minePath);
+        els.mineDepthReadout.textContent = `深度 ${state.world.depth} / ${MINING_RULES.maxDepth}`;
+        const unavailableReason = !atMineEntrance
+          ? "未抵达入口"
+          : state.world.depth >= MINING_RULES.maxDepth
+            ? "深度限制"
+            : null;
+        renderBranchProgress("左下", leftProgress, els.leftMiningTarget, els.leftMiningProgressText, els.leftMiningProgressBar, unavailableReason);
+        renderBranchProgress("右下", rightProgress, els.rightMiningTarget, els.rightMiningProgressText, els.rightMiningProgressBar, unavailableReason);
       }
 
       const atAnomaly =
         state.anomaly.revealed &&
-        state.world.position === TRACK.anomaly &&
-        state.world.depth === TRACK.anomalyDepth;
+        state.world.minePath === TRACK.anomalyPath;
+      const nextBranchRespawnMs = Simulation.nextBranchRespawnMs(state);
       if (atAnomaly) {
         els.environmentHint.textContent = "频谱传感器确认异常源就在当前地下空腔。可在工坊开始采样。";
-      } else if (state.world.depth > 0 && !target) {
-        els.environmentHint.textContent = "已经到达当前掘进头的极限深度。沿竖井上升后可以选择其他横向位置。";
-      } else if (state.world.depth > 0 && progress.open) {
-        els.environmentHint.textContent = "下方竖井已经开通，可以继续下降或返回地表。";
-      } else if (state.world.depth > 0 && target) {
+      } else if (state.world.depth >= MINING_RULES.maxDepth) {
+        els.environmentHint.textContent = "已经到达掘进头的极限深度。向上后开辟另一条支路。";
+      } else if (state.world.depth > 0) {
+        els.environmentHint.textContent = "当前节点可向左下或右下继续开掘；向上可以改走已有支路。";
+      } else if (branchHere) {
         els.environmentHint.textContent =
-          `下方是深度 ${target.depth} 岩层，需要完成 ${progress.required} 次掘进。`;
+          `地面有掉落树枝：拾取可得 ${FOREST_RULES.woodPerBranch} 木材，约 ${Math.ceil(FOREST_RULES.branchRespawnMs / 1000)} 秒后再生。`;
       } else if (treeHere) {
         els.environmentHint.textContent =
-          `当前位置有成熟树木：伐木可得 ${FOREST_RULES.woodPerTree} 木材。木材既是建设材料，也是当前燃料。`;
+          `当前位置有成熟树木：伐木可得 ${FOREST_RULES.woodPerTree} 木材，但下一轮再生很慢。`;
       } else if (Simulation.atBoundary(state)) {
         els.environmentHint.textContent = "前方是森林边界，需要先掉头。";
+      } else if (miningUnlocked && !atMineEntrance) {
+        els.environmentHint.textContent = `矿井入口位于横向 ${TRACK.mineEntrance}。先沿地表抵达入口。`;
       } else if (miningUnlocked) {
-        els.environmentHint.textContent = "在地表选择横向位置，然后向下掘进；矿物与坑道状态会永久保留。";
+        els.environmentHint.textContent = "矿井入口已就位。选择左下或右下，开辟第一条矿路。";
+      } else if (state.world.branches.length > 0) {
+        els.environmentHint.textContent = "继续沿森林地表移动，寻找掉落的树枝；已拾取的树枝会较快再生。";
       } else {
-        const respawnMs = Simulation.nextTreeRespawnMs(state);
+        const treeRespawnMs = Simulation.nextTreeRespawnMs(state);
         els.environmentHint.textContent =
-          respawnMs > 0
-            ? `当前位置没有可采集目标。下一株树木约 ${Math.ceil(respawnMs / 1000)} 秒后恢复。`
-            : "当前位置没有成熟树木。继续沿森林地表移动。";
+          nextBranchRespawnMs > 0
+            ? `树枝会在约 ${Math.ceil(nextBranchRespawnMs / 1000)} 秒后重新掉落；成熟树木仍需更久再生。`
+            : treeRespawnMs > 0
+              ? `掉落树枝已经收集完。下一株树木约 ${Math.ceil(treeRespawnMs / 1000)} 秒后再生。`
+              : "当前没有可拾取木材。";
       }
 
       const controllerIds = ["drive", "pickup"];
       if (miningUnlocked) controllerIds.push("excavator");
       renderControllerCards(els.environmentControllerList, state, status, controllerIds);
     }
+    function renderResearch(state) {
+      const research = state.research ?? {
+        modelVersion: 0,
+        completed: false,
+        observations: [],
+        conclusions: [],
+      };
+      els.researchModelStatus.textContent = research.completed
+        ? `模型 v${research.modelVersion}`
+        : "尚未整理";
+      els.researchDescription.textContent = research.completed
+        ? "模型只描述可重复观测与未知边界，不把未知场伪装成已经掌握的资源。"
+        : "先用标准部件整理观测数据，再决定是否能制造主体接口。模型不会把未知场直接显示成可用资源。";
 
-    function rebuildEnvironmentGrid(state, target, progress, visibleDepth) {
+      const records = research.completed
+        ? [...research.observations, ...research.conclusions]
+        : [];
+      const signature = JSON.stringify({
+        completed: research.completed,
+        modelVersion: research.modelVersion,
+        records,
+      });
+      if (renderSignatures.get(els.researchObservationList) === signature) return;
+      renderSignatures.set(els.researchObservationList, signature);
+      if (records.length === 0) {
+        const empty = document.createElement("p");
+        empty.className = "observation-empty";
+        empty.textContent = "尚无第一版模型。加工台完成标准部件后，可以整理残阵响应。";
+        els.researchObservationList.replaceChildren(empty);
+        return;
+      }
+      els.researchObservationList.replaceChildren(
+        ...records.map((record) => {
+          const item = document.createElement("div");
+          item.className = "observation-item";
+          const label = document.createElement("span");
+          label.textContent = record.label;
+          const value = document.createElement("strong");
+          value.textContent = record.value;
+          const confidence = document.createElement("small");
+          confidence.textContent =
+            record.confidence === "confirmed"
+              ? "已确认"
+              : record.confidence === "provisional"
+                ? "暂定"
+                : "未知";
+          item.append(label, value, confidence);
+          return item;
+        }),
+      );
+    }
+
+    function renderInner(state) {
+      const metrics = Simulation.innerMetrics(state);
+      const available = Boolean(metrics);
+      const pulseCount = metrics?.manualPulses ?? 0;
+      els.innerPulseCount.textContent = `${pulseCount} / ${INNER_RULES.manualPulsesRequired}`;
+      els.innerPulseBtn.disabled =
+        !available ||
+        state.clock.paused ||
+        state.shutdown ||
+        metrics.active ||
+        pulseCount >= INNER_RULES.manualPulsesRequired ||
+        state.resources.energy < INNER_RULES.pulseEnergy;
+      els.innerPulseBtn.querySelector("strong").textContent = metrics?.active
+        ? "引灵脉冲运行中"
+        : "低功率引灵脉冲";
+      els.innerPulseBtn.querySelector("span").textContent = metrics?.active
+        ? `剩余 ${formatTime(metrics.pulseMs)}，请等待本次观测完成`
+        : `消耗 ${formatNumber(INNER_RULES.pulseEnergy)} 能源，运行 ${formatTime(INNER_RULES.pulseDurationMs)}`;
+      els.innerHint.textContent = !available
+        ? "灵触接口尚未接入内景内核。"
+        : metrics.active
+          ? "脉冲运行中：只读取响应，不追加新的控制命令。"
+          : pulseCount < INNER_RULES.manualPulsesRequired
+            ? "完成三次脉冲，记录灵触响应。"
+            : "三次低功率引灵已经完成，可以继续观察稳定度和故障证据。";
+
+      const touch = metrics?.touch;
+      const refine = metrics?.refine;
+      const dantian = metrics?.dantian;
+      els.innerTouchPressure.textContent = touch ? formatNumber(touch.pressure) : "—";
+      els.innerRefinePressure.textContent = refine ? formatNumber(refine.pressure) : "—";
+      els.innerDantianPressure.textContent = dantian ? formatNumber(dantian.pressure) : "—";
+      els.innerPurity.textContent = touch ? `${formatNumber(touch.purity * 100)}%` : "—";
+      els.innerTemperature.textContent = refine ? formatNumber(refine.temperature) : "—";
+      els.innerStability.textContent = refine ? `${formatNumber(refine.stability)}%` : "—";
+      els.innerFaultText.textContent = !metrics
+        ? "尚未运行引灵脉冲。"
+        : metrics.faults.length > 0
+          ? `当前故障：${metrics.faults.join("、")}`
+          : "当前没有可解释故障。继续记录脉冲后的变化。";
+      els.innerEventList.replaceChildren(
+        ...(metrics?.events ?? []).slice(-5).map((event) => {
+          const item = document.createElement("div");
+          item.className = "inner-event-item";
+          item.textContent = event.text || `${event.kind} @ ${event.node}`;
+          return item;
+        }),
+      );
+
+      const observations = metrics?.observations ?? [];
+      els.innerObservationStatus.textContent = `${observations.length} / ${INNER_RULES.manualPulsesRequired}`;
+      if (observations.length === 0) {
+        const empty = document.createElement("p");
+        empty.className = "observation-empty";
+        empty.textContent = "完成一次低功率脉冲后，这里会保存可复查的读数。";
+        els.innerObservationList.replaceChildren(empty);
+      } else {
+        els.innerObservationList.replaceChildren(
+          ...observations.map((observation) => {
+            const item = document.createElement("article");
+            item.className = "inner-observation-item";
+
+            const heading = document.createElement("div");
+            heading.className = "inner-observation-heading";
+            const title = document.createElement("strong");
+            title.textContent = `第 ${observation.pulse} 次脉冲`;
+            const status = document.createElement("span");
+            status.textContent =
+              observation.faults.length > 0
+                ? `故障 ${observation.faults.length}`
+                : "未见故障";
+            heading.append(title, status);
+
+            const pressure = document.createElement("p");
+            pressure.textContent =
+              `灵触 ${formatNumber(observation.touchPressure)} · ` +
+              `炼化 ${formatNumber(observation.refinePressure)} · ` +
+              `丹田 ${formatNumber(observation.dantianPressure)}`;
+
+            const condition = document.createElement("small");
+            condition.textContent =
+              `纯度 ${formatNumber(observation.purity * 100)}% · ` +
+              `温度 ${formatNumber(observation.temperature)} · ` +
+              `稳定 ${formatNumber(observation.stability)}%`;
+
+            item.append(heading, pressure, condition);
+            return item;
+          }),
+        );
+      }
+    }
+
+
+    function renderBranchProgress(label, progress, target, text, bar, unavailableReason) {
+      if (unavailableReason || stateAtDepthLimit(progress)) {
+        target.textContent = `${label} · ${unavailableReason ?? "不可用"}`;
+        text.textContent = "已封锁";
+        bar.style.width = "100%";
+      } else if (progress.open) {
+        target.textContent = `${label} · 已开通`;
+        text.textContent = "可进入";
+        bar.style.width = "100%";
+      } else {
+        target.textContent = `${label} · 目标岩层`;
+        text.textContent = `${progress.current} / ${progress.required}`;
+        bar.style.width = `${progress.ratio * 100}%`;
+      }
+    }
+
+    function stateAtDepthLimit(progress) {
+      return !progress.open && progress.required === 0;
+    }
+
+    function rebuildSurfaceTrack(state) {
       els.track.replaceChildren();
-      for (let depth = 0; depth <= visibleDepth; depth += 1) {
-        for (let position = 0; position < TRACK.length; position += 1) {
+      for (let position = 0; position < TRACK.length; position += 1) {
           const cell = document.createElement("div");
-          const excavated = Simulation.cellExcavated(state, position, depth);
-          const isTarget = target?.position === position && target.depth === depth;
-          cell.className = "track-cell";
-          cell.classList.toggle("surface-cell", depth === 0);
-          cell.classList.toggle("subsurface-cell", depth > 0);
-          cell.classList.toggle("solid", depth > 0 && !excavated);
-          cell.classList.toggle("excavated", depth > 0 && excavated);
-          cell.classList.toggle("start", depth === 0 && position === TRACK.start);
-          cell.classList.toggle("dig-target", isTarget);
-          cell.classList.toggle(
-            "anomaly-site",
-            state.anomaly.revealed &&
-              position === TRACK.anomaly &&
-              depth === TRACK.anomalyDepth,
-          );
-          cell.dataset.depth = String(depth);
+          cell.className = "track-cell surface-cell";
+          cell.classList.toggle("start", position === TRACK.start);
+          cell.classList.toggle("mine-entrance", position === TRACK.mineEntrance);
 
-          if (depth === 0 && state.world.trees.includes(position)) {
+          if (state.world.trees.includes(position)) {
             const tree = document.createElement("span");
             tree.className = "tree-marker";
             tree.title = "成熟树木";
             cell.appendChild(tree);
           }
-          if (
-            state.anomaly.revealed &&
-            position === TRACK.anomaly &&
-            depth === TRACK.anomalyDepth
-          ) {
-            const anomaly = document.createElement("span");
-            anomaly.className = "buried-anomaly-marker";
-            anomaly.textContent = "Δ";
-            anomaly.title = "地下异常源";
-            cell.appendChild(anomaly);
+          if (state.world.branches.includes(position)) {
+            const branch = document.createElement("span");
+            branch.className = "branch-marker";
+            branch.textContent = "枝";
+            branch.title = "掉落树枝";
+            cell.appendChild(branch);
           }
-          if (state.world.position === position && state.world.depth === depth) {
+          if (position === TRACK.mineEntrance && state.unlocks.mining) {
+            const entrance = document.createElement("span");
+            entrance.className = "mine-entrance-marker";
+            entrance.textContent = "矿";
+            entrance.title = "分支矿井入口";
+            cell.appendChild(entrance);
+          }
+          if (state.world.position === position && state.world.depth === 0) {
             const robot = document.createElement("span");
             robot.className = "robot-marker";
-            robot.textContent = depth > 0 ? "↓" : state.world.direction > 0 ? "›" : "‹";
+            robot.textContent = state.world.direction > 0 ? "›" : "‹";
             robot.title = "机体当前位置";
             cell.appendChild(robot);
           }
-          if (isTarget && !excavated && progress.current > 0) {
-            const fill = document.createElement("i");
-            fill.className = "dig-fill";
-            fill.style.height = `${progress.ratio * 100}%`;
-            cell.appendChild(fill);
-          }
-
-          if (depth === 0) {
-            const index = document.createElement("small");
-            index.className = "track-index";
-            index.textContent = String(position);
-            cell.appendChild(index);
-          }
-          if (position === 0) {
-            const depthLabel = document.createElement("small");
-            depthLabel.className = "depth-label";
-            depthLabel.textContent = depth === 0 ? "地表" : `-${depth}`;
-            cell.appendChild(depthLabel);
-          }
+          const index = document.createElement("small");
+          index.className = "track-index";
+          index.textContent = String(position);
+          cell.appendChild(index);
           els.track.appendChild(cell);
-        }
       }
+    }
+
+    function rebuildMineTree(state) {
+      els.mineTree.replaceChildren();
+      const atEntrance = state.world.depth > 0 || state.world.position === TRACK.mineEntrance;
+      if (!atEntrance) {
+        const empty = document.createElement("p");
+        empty.className = "mine-tree-empty";
+        empty.textContent = `前往横向 ${TRACK.mineEntrance} 以查看矿路。`;
+        els.mineTree.appendChild(empty);
+        return;
+      }
+      const rootPath = state.world.minePath ?? "";
+      const visible = new Set(Simulation.visibleMineNodes(state));
+      els.mineTree.style.setProperty(
+        "--mine-zoom",
+        String(Math.min(MINING_RULES.maxViewZoom, 1 + state.world.depth * 0.06)),
+      );
+      els.mineTree.appendChild(buildMineBranch(state, rootPath, visible, true));
+    }
+
+    function buildMineBranch(state, path, visible, isRoot) {
+      const item = document.createElement("div");
+      item.className = "mine-branch";
+      const node = document.createElement(isRoot ? "div" : "button");
+      node.className = "mine-node";
+      node.classList.toggle("current", isRoot);
+      node.classList.toggle("anomaly", state.anomaly.revealed && path === TRACK.anomalyPath);
+      node.textContent = isRoot ? (path ? path.slice(-1) : "入口") : path.slice(-1);
+      node.title = `${formatMinePath(path)} · 深度 ${path.length}`;
+      if (!isRoot && path.length === (state.world.minePath?.length ?? 0) + 1) {
+        node.dataset.enterBranch = path.slice(-1);
+      } else if (!isRoot) {
+        node.disabled = true;
+      }
+      if (Simulation.oreAtPath(path) > 0) node.classList.add("ore-bearing");
+      item.appendChild(node);
+
+      const children = ["L", "R"]
+        .map((branch) => `${path}${branch}`)
+        .filter((child) => visible.has(child));
+      if (children.length > 0) {
+        const childRow = document.createElement("div");
+        childRow.className = "mine-children";
+        for (const child of children) {
+          childRow.appendChild(buildMineBranch(state, child, visible, false));
+        }
+        item.appendChild(childRow);
+      }
+      return item;
+    }
+
+    function formatMinePath(path) {
+      if (!path) return "入口";
+      return `入口 / ${path.split("").map((branch) => (branch === "L" ? "左" : "右")).join(" / ")}`;
     }
 
     function environmentGridKey(state) {
       const world = state.world;
-      const target = Simulation.digTarget(state);
       return [
         state.unlocks.mining,
         world.position,
         world.depth,
         world.direction,
         world.trees.join(","),
-        world.excavated.join(","),
-        JSON.stringify(world.digProgress),
+        world.branches.join(","),
+      ].join("|");
+    }
+
+    function mineTreeKey(state) {
+      return [
+        state.world.position,
+        state.world.minePath ?? "surface",
+        state.world.mineNodes.join(","),
+        JSON.stringify(state.world.mineProgress),
         state.anomaly.revealed,
-        target ? `${target.position}:${target.depth}` : "none",
       ].join("|");
     }
 
@@ -523,13 +744,16 @@
       const ids = ["mineHead", "bench", "generator", "sensor"];
       if (state.anomaly.revealed && !state.anomaly.confirmed) ids.push("anomalySample");
       if (state.anomaly.confirmed) ids.push("processor");
+      if (state.anomaly.confirmed && state.structures.processor) ids.push("anomalyResearch");
+      if (state.research.completed) ids.push("lingchu");
       const signature = JSON.stringify({
         ids,
         structures: state.structures,
+        research: state.research,
         jobId: state.job?.id ?? null,
         anomaly: state.anomaly,
-        atAnomaly:
-          state.world.position === TRACK.anomaly && state.world.depth === TRACK.anomalyDepth,
+        industry: state.industry,
+        atAnomaly: state.world.minePath === TRACK.anomalyPath,
       });
       if (renderSignatures.get(els.buildList) !== signature) {
         renderSignatures.set(els.buildList, signature);
@@ -560,7 +784,9 @@
         (id === "generator" && state.structures.generator) ||
         (id === "sensor" && state.structures.sensor) ||
         (id === "anomalySample" && state.anomaly.confirmed) ||
-        (id === "processor" && state.structures.processor);
+        (id === "processor" && state.structures.processor) ||
+        (id === "anomalyResearch" && state.research.completed) ||
+        (id === "lingchu" && state.structures.lingchu);
       const available = Simulation.jobAvailable(state, id);
       const item = document.createElement("article");
       item.className = "build-item";
@@ -602,7 +828,7 @@
     }
 
     function buildDescription(state, id) {
-      if (id === "mineHead") return "把环境模型从地表横线扩展为可向下开掘的二维剖面。";
+      if (id === "mineHead") return "在地表末端建立矿井入口，并把环境模型扩展为可分支开掘的二叉矿路。";
       if (id === "bench") return "使用地下结构料建立稳定设备基座，是后续工坊设施的基础。";
       if (id === "generator") {
         return `能源低于 ${FOREST_RULES.generatorReserveTarget} 时自动消耗木材供能，并保留 ${FOREST_RULES.generatorWoodReserve} 木材作为应急燃料。`;
@@ -611,11 +837,14 @@
       if (id === "processor") {
         return "把矿石加工成标准部件。部件是灵性接口与内景部件的基础材料。";
       }
-      if (
-        state.world.position !== TRACK.anomaly ||
-        state.world.depth !== TRACK.anomalyDepth
-      ) {
-        return `残阵位于横向 ${TRACK.anomaly}、深度 ${TRACK.anomalyDepth}。需要开掘到现场。`;
+      if (id === "anomalyResearch") {
+        return "整理三次采样、频谱变化与输入边界，建立只读的第一版异常响应模型。";
+      }
+      if (id === "lingchu") {
+        return "用标准部件装配灵触接口。接口只允许低功率观测，不能把未知场直接当作能源。";
+      }
+      if (state.world.minePath !== TRACK.anomalyPath) {
+        return `残阵位于矿路 ${TRACK.anomalyPath}。需要沿右、左、右、右开掘到现场。`;
       }
       return "记录完整输入与输出。三次一致结果才能排除传感器误差。";
     }
@@ -776,6 +1005,7 @@
       environmentTab: byId("environmentTab"),
       workshopTab: byId("workshopTab"),
       anomalyTab: byId("anomalyTab"),
+      innerTab: byId("innerTab"),
       coreGauge: byId("coreGauge"),
       coreState: byId("coreState"),
       heartbeatBtn: byId("heartbeatBtn"),
@@ -793,12 +1023,19 @@
       reverseBtn: byId("reverseBtn"),
       pickupBtn: byId("pickupBtn"),
       burnWoodBtn: byId("burnWoodBtn"),
-      digBtn: byId("digBtn"),
+      digLeftBtn: byId("digLeftBtn"),
+      digRightBtn: byId("digRightBtn"),
       ascendBtn: byId("ascendBtn"),
-      miningReadout: byId("miningReadout"),
-      miningTarget: byId("miningTarget"),
-      miningProgressText: byId("miningProgressText"),
-      miningProgressBar: byId("miningProgressBar"),
+      mineViewport: byId("mineViewport"),
+      mineTree: byId("mineTree"),
+      minePathReadout: byId("minePathReadout"),
+      mineDepthReadout: byId("mineDepthReadout"),
+      leftMiningTarget: byId("leftMiningTarget"),
+      leftMiningProgressText: byId("leftMiningProgressText"),
+      leftMiningProgressBar: byId("leftMiningProgressBar"),
+      rightMiningTarget: byId("rightMiningTarget"),
+      rightMiningProgressText: byId("rightMiningProgressText"),
+      rightMiningProgressBar: byId("rightMiningProgressBar"),
       environmentHint: byId("environmentHint"),
       environmentControllerList: byId("environmentControllerList"),
       activeJob: byId("activeJob"),
@@ -806,6 +1043,22 @@
       activeJobTime: byId("activeJobTime"),
       jobProgress: byId("jobProgress"),
       buildList: byId("buildList"),
+      researchModelStatus: byId("researchModelStatus"),
+      researchDescription: byId("researchDescription"),
+      researchObservationList: byId("researchObservationList"),
+      innerPulseBtn: byId("innerPulseBtn"),
+      innerPulseCount: byId("innerPulseCount"),
+      innerHint: byId("innerHint"),
+      innerTouchPressure: byId("innerTouchPressure"),
+      innerRefinePressure: byId("innerRefinePressure"),
+      innerDantianPressure: byId("innerDantianPressure"),
+      innerPurity: byId("innerPurity"),
+      innerTemperature: byId("innerTemperature"),
+      innerStability: byId("innerStability"),
+      innerFaultText: byId("innerFaultText"),
+      innerEventList: byId("innerEventList"),
+      innerObservationStatus: byId("innerObservationStatus"),
+      innerObservationList: byId("innerObservationList"),
       diagnostics: byId("diagnostics"),
       programTabs: byId("programTabs"),
       ladderTitle: byId("ladderTitle"),

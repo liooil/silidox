@@ -85,11 +85,13 @@
       return {
         max_actions_per_second: 1,
         energy_per_action: MINING_RULES.digEnergy,
+        branch_factor: 2,
+        max_depth: MINING_RULES.maxDepth,
       };
     }
     return {
       max_actions_per_second: 1,
-      energy_per_action: SURVIVAL_RULES.harvestEnergy,
+      energy_per_action: SURVIVAL_RULES.pickupEnergy,
     };
   }
 

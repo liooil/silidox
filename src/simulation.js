@@ -4,8 +4,10 @@
     CONTROLLERS,
     FOREST_RULES,
     INDUSTRY_RULES,
+    INNER_RULES,
     JOBS,
     MINING_RULES,
+    RESEARCH_MODEL,
     RESOURCE_LIMITS,
     STARTING_RESOURCES,
     SURVIVAL_RULES,
@@ -19,7 +21,7 @@
       clock: {
         elapsedMs: 0,
         paused: false,
-        savedAt: Date.now(),
+        savedAt: 0,
       },
       resources: { ...STARTING_RESOURCES },
       unlocks: {
@@ -28,10 +30,13 @@
         workshop: false,
         mining: false,
         anomaly: false,
+        research: false,
+        inner: false,
       },
       milestones: {
         manualHeartbeats: 0,
         manualMoves: 0,
+        branchPickups: 0,
         chops: 0,
         fuelBurns: 0,
         digs: 0,
@@ -51,6 +56,7 @@
         generator: false,
         sensor: false,
         processor: false,
+        lingchu: false,
       },
       control: {
         currentLoad: 0,
@@ -65,20 +71,30 @@
         position: TRACK.start,
         depth: 0,
         direction: 1,
-        trees: [...TRACK.trees],
-        treeRespawn: {},
-        excavated: [],
-        digProgress: {},
+        trees: [],
+        treeRespawn: initialTreeRespawn(),
+        branches: [...TRACK.branches],
+        branchRespawn: {},
+        minePath: null,
+        mineNodes: [],
+        mineProgress: {},
       },
       anomaly: {
         revealed: false,
         samples: 0,
         confirmed: false,
       },
+      research: {
+        modelVersion: 0,
+        completed: false,
+        observations: [],
+        conclusions: [],
+      },
       industry: {
         processorMs: 0,
         batches: 0,
       },
+      inner: null,
       job: null,
       shutdown: false,
       legacyArchive,
@@ -87,6 +103,15 @@
         createLog("info", "当前只能读取最低限度的机体状态。", 0),
       ],
     };
+  }
+  function initialTreeRespawn() {
+    return Object.fromEntries(
+      TRACK.trees.map((position, index) => [
+        position,
+        FOREST_RULES.initialTreeGrowthMs +
+          index * FOREST_RULES.initialTreeGrowthStepMs,
+      ]),
+    );
   }
 
   function createControllerState(id) {
@@ -112,7 +137,7 @@
     base.stage = typeof value.stage === "string" ? value.stage : base.stage;
     base.clock.elapsedMs = finite(value.clock?.elapsedMs, 0, Number.MAX_SAFE_INTEGER);
     base.clock.paused = Boolean(value.clock?.paused);
-    base.clock.savedAt = Date.now();
+    base.clock.savedAt = finite(value.clock?.savedAt, 0, Number.MAX_SAFE_INTEGER);
 
     for (const resource of Object.keys(base.resources)) {
       base.resources[resource] = finite(
@@ -166,13 +191,37 @@
     );
 
     base.world.position = Math.floor(finite(value.world?.position, 0, TRACK.length - 1));
-    base.world.depth = Math.floor(finite(value.world?.depth, 0, MINING_RULES.maxDepth));
     base.world.direction = value.world?.direction === -1 ? -1 : 1;
     base.world.trees = Array.isArray(value.world?.trees)
       ? value.world.trees
           .filter((position) => Number.isInteger(position) && TRACK.trees.includes(position))
           .filter((position, index, list) => list.indexOf(position) === index)
       : [...TRACK.trees];
+    base.world.branches = Array.isArray(value.world?.branches)
+      ? value.world.branches
+          .filter((position) => Number.isInteger(position) && TRACK.branches.includes(position))
+          .filter((position, index, list) => list.indexOf(position) === index)
+      : [];
+    base.world.branchRespawn = {};
+    if (value.world?.branchRespawn && typeof value.world.branchRespawn === "object") {
+      for (const position of TRACK.branches) {
+        const remaining = Number(value.world.branchRespawn[position]);
+        if (Number.isFinite(remaining)) {
+          base.world.branchRespawn[position] = Math.max(
+            0,
+            Math.min(remaining, FOREST_RULES.branchRespawnMs),
+          );
+        }
+      }
+    }
+    for (const position of TRACK.branches) {
+      if (
+        !base.world.branches.includes(position) &&
+        !Object.hasOwn(base.world.branchRespawn, position)
+      ) {
+        base.world.branchRespawn[position] = FOREST_RULES.branchRespawnMs;
+      }
+    }
     base.world.treeRespawn = {};
     if (value.world?.treeRespawn && typeof value.world.treeRespawn === "object") {
       for (const position of TRACK.trees) {
@@ -185,31 +234,57 @@
         }
       }
     }
-    base.world.excavated = Array.isArray(value.world?.excavated)
-      ? value.world.excavated
-          .filter((key) => validMineCellKey(key))
-          .filter((key, index, list) => list.indexOf(key) === index)
+    for (const position of TRACK.trees) {
+      if (
+        !base.world.trees.includes(position) &&
+        !Object.hasOwn(base.world.treeRespawn, position)
+      ) {
+        base.world.treeRespawn[position] = FOREST_RULES.treeRespawnMs;
+      }
+    }
+    const storedMineNodes = Array.isArray(value.world?.mineNodes)
+      ? value.world.mineNodes.filter(validMinePath)
       : [];
-    base.world.digProgress = {};
-    if (value.world?.digProgress && typeof value.world.digProgress === "object") {
+    base.world.mineNodes = [];
+    for (const path of storedMineNodes) {
+      addMinePathWithAncestors(base.world.mineNodes, path);
+    }
+    if (base.world.mineNodes.length === 0 && Array.isArray(value.world?.excavated)) {
+      for (const key of value.world.excavated) {
+        if (!validLegacyMineCellKey(key)) continue;
+        const cell = parseLegacyMineCellKey(key);
+        addMinePathWithAncestors(base.world.mineNodes, legacyMinePath(cell.position, cell.depth));
+      }
+    }
+    base.world.mineNodes = [...new Set(base.world.mineNodes)].sort(compareMinePaths);
+
+    const storedPath = validMinePath(value.world?.minePath) ? value.world.minePath : null;
+    const legacyDepth = Math.floor(finite(value.world?.depth, 0, MINING_RULES.maxDepth));
+    if (storedPath && base.world.mineNodes.includes(storedPath)) {
+      base.world.minePath = storedPath;
+    } else if (legacyDepth > 0) {
+      base.world.minePath = legacyMinePath(base.world.position, legacyDepth);
+      addMinePathWithAncestors(base.world.mineNodes, base.world.minePath);
+    }
+    if (base.world.minePath) base.world.position = TRACK.mineEntrance;
+    base.world.depth = base.world.minePath?.length ?? 0;
+
+    base.world.mineProgress = {};
+    const storedProgress = value.world?.mineProgress;
+    if (storedProgress && typeof storedProgress === "object") {
+      for (const [path, progress] of Object.entries(storedProgress)) {
+        restoreMineProgress(base.world, path, progress);
+      }
+    } else if (value.world?.digProgress && typeof value.world.digProgress === "object") {
       for (const [key, progress] of Object.entries(value.world.digProgress)) {
-        if (!validMineCellKey(key) || base.world.excavated.includes(key)) continue;
-        const { depth } = parseMineCellKey(key);
-        base.world.digProgress[key] = Math.floor(
-          finite(progress, 0, MINING_RULES.hardnessByDepth[depth] - 1),
-        );
+        if (!validLegacyMineCellKey(key)) continue;
+        const cell = parseLegacyMineCellKey(key);
+        restoreMineProgress(base.world, legacyMinePath(cell.position, cell.depth), progress);
       }
     }
-    if (base.world.depth > 0) {
-      for (let depth = 1; depth <= base.world.depth; depth += 1) {
-        const key = mineCellKey(base.world.position, depth);
-        if (!base.world.excavated.includes(key)) base.world.excavated.push(key);
-      }
-    }
-    const excavatedDepths = base.world.excavated.map(
-      (key) => parseMineCellKey(key).depth,
-    );
-    base.milestones.digs = Math.max(base.milestones.digs, base.world.excavated.length);
+
+    const excavatedDepths = base.world.mineNodes.map((path) => path.length);
+    base.milestones.digs = Math.max(base.milestones.digs, base.world.mineNodes.length);
     base.milestones.deepestDepth = Math.max(
       base.milestones.deepestDepth,
       base.world.depth,
@@ -219,8 +294,18 @@
     base.anomaly.revealed = Boolean(value.anomaly?.revealed);
     base.anomaly.samples = Math.floor(finite(value.anomaly?.samples, 0, 3));
     base.anomaly.confirmed = Boolean(value.anomaly?.confirmed);
+    base.research.modelVersion = Math.floor(
+      finite(value.research?.modelVersion, 0, 1),
+    );
+    base.research.completed = Boolean(value.research?.completed);
+    base.research.observations = normalizeResearchRecords(value.research?.observations);
+    base.research.conclusions = normalizeResearchRecords(value.research?.conclusions);
     base.industry.processorMs = finite(value.industry?.processorMs, 0, 600000);
     base.industry.batches = Math.floor(finite(value.industry?.batches, 0, 999999));
+    base.inner = normalizeInnerRuntime(value.inner);
+    if (base.structures.lingchu && !base.inner) {
+      base.inner = createInnerRuntime();
+    }
     base.shutdown = Boolean(value.shutdown);
     if (base.shutdown) base.resources.core = 0;
 
@@ -255,6 +340,82 @@
     if (!Number.isFinite(number)) return min;
     return Math.min(max, Math.max(min, number));
   }
+  function normalizeResearchRecords(value) {
+    if (!Array.isArray(value)) return [];
+    return value
+      .slice(-12)
+      .filter((record) => record && typeof record === "object")
+      .map((record) => ({
+        id: typeof record.id === "string" ? record.id : "unknown",
+        label: typeof record.label === "string" ? record.label : "未命名观测",
+        value: typeof record.value === "string" ? record.value : "未记录",
+        confidence: typeof record.confidence === "string" ? record.confidence : "unknown",
+      }));
+  }
+  function normalizeInnerObservations(value) {
+    if (!Array.isArray(value)) return [];
+    return value
+      .slice(-12)
+      .filter((observation) => observation && typeof observation === "object")
+      .map((observation, index) => ({
+        id:
+          typeof observation.id === "string"
+            ? observation.id
+            : `pulse-${index + 1}`,
+        pulse: Math.floor(
+          finite(
+            observation.pulse,
+            index + 1,
+            INNER_RULES.manualPulsesRequired,
+          ),
+        ),
+        atStep: Math.floor(finite(observation.atStep, 0, 999999)),
+        touchPressure: finite(observation.touchPressure, 0, 999),
+        refinePressure: finite(observation.refinePressure, 0, 999),
+        dantianPressure: finite(observation.dantianPressure, 0, 999),
+        purity: finite(observation.purity, 0, 1),
+        temperature: finite(observation.temperature, 20, 300),
+        stability: finite(observation.stability, 0, 100),
+        faults: Array.isArray(observation.faults)
+          ? observation.faults
+              .filter((fault) => typeof fault === "string")
+              .slice(0, 12)
+          : [],
+        eventCount: Math.floor(finite(observation.eventCount, 0, 80)),
+      }));
+  }
+
+
+  function createInnerRuntime() {
+    const kernel = global.SilidoxInnerLandscape;
+    if (!kernel?.createInnerState) return null;
+    return {
+      version: 1,
+      active: false,
+      pulseMs: 0,
+      manualPulses: 0,
+      lastEventCount: 0,
+      observations: [],
+      kernel: kernel.createInnerState(),
+    };
+  }
+
+  function normalizeInnerRuntime(value) {
+    if (!value || typeof value !== "object") return null;
+    const kernel = global.SilidoxInnerLandscape;
+    if (!kernel?.normalizeInnerState) return null;
+    return {
+      version: 1,
+      active: Boolean(value.active) && finite(value.pulseMs, 0, INNER_RULES.pulseDurationMs) > 0,
+      pulseMs: finite(value.pulseMs, 0, INNER_RULES.pulseDurationMs),
+      manualPulses: Math.floor(
+        finite(value.manualPulses, 0, INNER_RULES.manualPulsesRequired),
+      ),
+      lastEventCount: Math.floor(finite(value.lastEventCount, 0, 999999)),
+      observations: normalizeInnerObservations(value.observations),
+      kernel: kernel.normalizeInnerState(value.kernel),
+    };
+  }
 
   function createLog(type, text, atMs) {
     return { type, text, atMs };
@@ -274,6 +435,10 @@
     if (state.shutdown) {
       advanceEmergencyCharge(state, boundedDelta);
       state.control.currentLoad = 0;
+      if (state.inner) {
+        state.inner.active = false;
+        state.inner.pulseMs = 0;
+      }
       return state;
     }
 
@@ -292,8 +457,10 @@
 
     advanceJob(state, boundedDelta);
     advanceControllers(state, boundedDelta, evaluateProgram);
+    advanceBranches(state, boundedDelta);
     advanceTrees(state, boundedDelta);
     advanceProcessor(state, boundedDelta);
+    advanceInner(state, boundedDelta);
     applyControlEnergy(state, boundedDelta);
     return state;
   }
@@ -377,8 +544,8 @@
 
     if (controller.id === "heart") applyHeartbeat(state, "preset");
     if (controller.id === "drive") presetDrive(state);
-    if (controller.id === "pickup") harvest(state, "preset");
-    if (controller.id === "excavator") digDown(state, "preset");
+    if (controller.id === "pickup") pickup(state, "preset");
+    if (controller.id === "excavator") presetExcavator(state);
   }
 
   function advanceLadderController(state, controller, deltaMs, evaluateProgram) {
@@ -407,10 +574,11 @@
       else if (outputs.includes("Q0")) move(state, "ladder");
     }
     if (controller.id === "pickup" && outputs.includes("Q0")) {
-      harvest(state, "ladder");
+      pickup(state, "ladder");
     }
-    if (controller.id === "excavator" && outputs.includes("Q0")) {
-      digDown(state, "ladder");
+    if (controller.id === "excavator") {
+      if (outputs.includes("Q1")) digBranch(state, "R", "ladder");
+      else if (outputs.includes("Q0")) digBranch(state, "L", "ladder");
     }
   }
 
@@ -433,16 +601,16 @@
       };
     }
     if (controllerId === "excavator") {
-      const target = digTarget(state);
       return {
-        I0: canDigDown(state),
-        I1: Boolean(target && oreAtCell(target.position, target.depth) > 0),
+        I0: canDigBranch(state, "L"),
+        I1: canDigBranch(state, "R"),
+        I2: state.world.depth < MINING_RULES.maxDepth,
         0: false,
         1: true,
       };
     }
     return {
-      I0: harvestAvailable(state),
+      I0: pickupAvailable(state),
       0: false,
       1: true,
     };
@@ -459,10 +627,13 @@
     if (action === "heartbeat") return manualHeartbeat(state);
     if (action === "move") return move(state, "manual");
     if (action === "reverse") return reverse(state, "manual");
-    if (action === "harvest" || action === "pickup") return harvest(state, "manual");
-    if (action === "digDown") return digDown(state, "manual");
+    if (action === "pickup") return pickup(state, "manual");
+    if (action === "digLeft") return digBranch(state, "L", "manual");
+    if (action === "digRight") return digBranch(state, "R", "manual");
+    if (action === "digDown") return digBranch(state, "L", "manual");
     if (action === "ascend") return ascend(state, "manual");
     if (action === "burnWood") return burnWood(state);
+    if (action === "innerPulse") return innerPulse(state);
     if (action === "installController") return installController(state, payload);
     if (action === "setControllerMode") {
       return setControllerMode(state, payload?.id, payload?.mode);
@@ -555,62 +726,113 @@
     else move(state, "preset");
   }
 
-  function harvest(state, source) {
+  function pickup(state, source) {
     if (!state.unlocks.environment || state.world.depth > 0) return false;
-    const hasTree = treeAtPosition(state);
-    if (!hasTree) return false;
-    if (!spendResource(state, "energy", SURVIVAL_RULES.harvestEnergy)) return false;
+    if (branchAtPosition(state)) return pickupBranch(state, source);
+    if (treeAtPosition(state)) return harvestTree(state, source);
+    return false;
+  }
 
+  function pickupBranch(state, source) {
+    if (!spendResource(state, "energy", SURVIVAL_RULES.pickupEnergy)) return false;
+    state.world.branches = state.world.branches.filter(
+      (position) => position !== state.world.position,
+    );
+    state.world.branchRespawn[state.world.position] = FOREST_RULES.branchRespawnMs;
+    addResource(state, "wood", FOREST_RULES.woodPerBranch);
+    state.milestones.branchPickups += 1;
+    recordPickup(state);
+    if (source === "manual") {
+      log(
+        state,
+        "good",
+        `拾取树枝完成：木材 +${FOREST_RULES.woodPerBranch}。可用于建设或投入燃烧。`,
+      );
+    }
+    return true;
+  }
+
+  function harvestTree(state, source) {
+    if (!spendResource(state, "energy", SURVIVAL_RULES.pickupEnergy)) return false;
     state.world.trees = state.world.trees.filter(
       (position) => position !== state.world.position,
     );
     state.world.treeRespawn[state.world.position] = FOREST_RULES.treeRespawnMs;
     addResource(state, "wood", FOREST_RULES.woodPerTree);
     state.milestones.chops += 1;
-    state.controllers.pickup.outputCount += 1;
-    state.controllers.pickup.energySpent += SURVIVAL_RULES.harvestEnergy;
-    state.controllers.pickup.available = true;
-    state.unlocks.workshop = true;
+    recordPickup(state);
     if (source === "manual") {
-      log(state, "good", `伐木完成：木材 +${FOREST_RULES.woodPerTree}。可用于建设或投入燃烧。`);
+      log(
+        state,
+        "good",
+        `伐木完成：木材 +${FOREST_RULES.woodPerTree}。下一轮林木再生很慢。`,
+      );
     }
     return true;
   }
 
-  function digDown(state, source) {
-    if (!canDigDown(state)) return false;
-    const target = digTarget(state);
-    const key = mineCellKey(target.position, target.depth);
+  function recordPickup(state) {
+    state.controllers.pickup.outputCount += 1;
+    state.controllers.pickup.energySpent += SURVIVAL_RULES.pickupEnergy;
+    state.controllers.pickup.available = true;
+    state.unlocks.workshop = true;
+  }
+
+  function presetExcavator(state) {
+    if (state.world.depth >= MINING_RULES.maxDepth) return ascend(state, "preset");
+    const left = mineTargetPath(state, "L");
+    const right = mineTargetPath(state, "R");
+    if (left && !state.world.mineNodes.includes(left)) return digBranch(state, "L", "preset");
+    if (right && !state.world.mineNodes.includes(right)) return digBranch(state, "R", "preset");
+    if (state.world.depth > 0) return ascend(state, "preset");
+    return false;
+  }
+
+  function digBranch(state, branch, source) {
+    if (!canDigBranch(state, branch)) return false;
+    const targetPath = mineTargetPath(state, branch);
+    const targetDepth = targetPath.length;
     const excavator = state.controllers.excavator;
 
-    if (cellExcavated(state, target.position, target.depth)) {
+    if (state.world.mineNodes.includes(targetPath)) {
       if (!spendResource(state, "energy", MINING_RULES.verticalMoveEnergy)) return false;
-      state.world.depth = target.depth;
+      state.world.minePath = targetPath;
+      state.world.depth = targetDepth;
+      state.world.position = TRACK.mineEntrance;
       excavator.outputCount += 1;
       excavator.energySpent += MINING_RULES.verticalMoveEnergy;
-      if (source === "manual") log(state, "info", `沿竖井下降至深度 ${state.world.depth}。`);
-      return true;
-    }
-
-    if (!spendResource(state, "energy", MINING_RULES.digEnergy)) return false;
-    const progress = (state.world.digProgress[key] ?? 0) + 1;
-    state.world.digProgress[key] = progress;
-    excavator.outputCount += 1;
-    excavator.energySpent += MINING_RULES.digEnergy;
-
-    const required = MINING_RULES.hardnessByDepth[target.depth];
-    if (progress < required) {
       if (source === "manual") {
-        log(state, "info", `深度 ${target.depth} 岩层掘进 ${progress}/${required}。`);
+        log(state, "info", `进入${branch === "L" ? "左下" : "右下"}支路，当前深度 ${targetDepth}。`);
       }
       return true;
     }
 
-    delete state.world.digProgress[key];
-    state.world.excavated.push(key);
-    state.world.depth = target.depth;
-    const material = MINING_RULES.materialByDepth[target.depth];
-    const ore = oreAtCell(target.position, target.depth);
+    if (!spendResource(state, "energy", MINING_RULES.digEnergy)) return false;
+    const progress = (state.world.mineProgress[targetPath] ?? 0) + 1;
+    state.world.mineProgress[targetPath] = progress;
+    excavator.outputCount += 1;
+    excavator.energySpent += MINING_RULES.digEnergy;
+
+    const required = hardnessAtDepth(targetDepth);
+    if (progress < required) {
+      if (source === "manual") {
+        log(
+          state,
+          "info",
+          `${branch === "L" ? "左下" : "右下"}岩层掘进 ${progress}/${required}。`,
+        );
+      }
+      return true;
+    }
+
+    delete state.world.mineProgress[targetPath];
+    state.world.mineNodes.push(targetPath);
+    state.world.mineNodes.sort(compareMinePaths);
+    state.world.minePath = targetPath;
+    state.world.depth = targetDepth;
+    state.world.position = TRACK.mineEntrance;
+    const material = materialAtDepth(targetDepth);
+    const ore = oreAtPath(targetPath);
     addResource(state, "material", material);
     if (ore > 0) {
       addResource(state, "ore", ore);
@@ -619,12 +841,16 @@
     state.milestones.digs += 1;
     state.milestones.deepestDepth = Math.max(
       state.milestones.deepestDepth,
-      target.depth,
+      targetDepth,
     );
     excavator.available = true;
     if (source === "manual") {
       const oreText = ore > 0 ? `，矿石 +${ore}` : "";
-      log(state, "good", `击穿深度 ${target.depth}：结构料 +${material}${oreText}。`);
+      log(
+        state,
+        "good",
+        `击穿${branch === "L" ? "左下" : "右下"}支路至深度 ${targetDepth}：结构料 +${material}${oreText}。`,
+      );
     }
     return true;
   }
@@ -632,14 +858,17 @@
   function ascend(state, source) {
     if (!state.unlocks.mining || state.world.depth <= 0) return false;
     if (!spendResource(state, "energy", MINING_RULES.verticalMoveEnergy)) return false;
-    state.world.depth -= 1;
+    const parentPath = state.world.minePath.slice(0, -1);
+    state.world.minePath = parentPath || null;
+    state.world.depth = parentPath.length;
+    state.world.position = TRACK.mineEntrance;
     state.controllers.drive.outputCount += 1;
     state.controllers.drive.energySpent += MINING_RULES.verticalMoveEnergy;
     if (source === "manual") {
       log(
         state,
         "info",
-        state.world.depth === 0 ? "已经返回地表。" : `沿竖井上升至深度 ${state.world.depth}。`,
+        state.world.depth === 0 ? "已经向上到矿井入口。" : `向上，当前深度 ${state.world.depth}。`,
       );
     }
     return true;
@@ -656,6 +885,34 @@
     addResource(state, "energy", gained);
     state.milestones.fuelBurns += 1;
     log(state, "good", `投入 ${FOREST_RULES.manualBurnWood} 木材，能源 +${formatAmount(gained)}。`);
+    return true;
+  }
+  function innerPulse(state) {
+    const kernel = global.SilidoxInnerLandscape;
+    if (
+      !state.unlocks.inner ||
+      !state.inner ||
+      !kernel ||
+      state.clock.paused ||
+      state.shutdown ||
+      state.inner.active ||
+      state.inner.manualPulses >= INNER_RULES.manualPulsesRequired
+    ) {
+      return false;
+    }
+    if (!spendResource(state, "energy", INNER_RULES.pulseEnergy)) {
+      log(state, "warn", "能源不足，无法启动低功率引灵脉冲。");
+      return false;
+    }
+    kernel.applyControl(state.inner.kernel, {
+      mode: "quiet",
+      reliefOpen: 0,
+      purgeOpen: 0,
+    });
+    state.inner.active = true;
+    state.inner.pulseMs = INNER_RULES.pulseDurationMs;
+    state.inner.lastEventCount = state.inner.kernel.events.length;
+    log(state, "info", "低功率引灵脉冲启动，正在记录灵触响应。");
     return true;
   }
 
@@ -729,8 +986,7 @@
         state.structures.sensor &&
         state.anomaly.revealed &&
         state.anomaly.samples < 3 &&
-        state.world.position === TRACK.anomaly &&
-        state.world.depth === TRACK.anomalyDepth
+        state.world.minePath === TRACK.anomalyPath
       );
     }
     if (id === "processor") {
@@ -739,6 +995,17 @@
         state.milestones.orePickups >= 1 &&
         !state.structures.processor
       );
+    }
+    if (id === "anomalyResearch") {
+      return (
+        state.anomaly.confirmed &&
+        state.structures.processor &&
+        state.industry.batches >= 1 &&
+        !state.research.completed
+      );
+    }
+    if (id === "lingchu") {
+      return state.research.completed && !state.structures.lingchu;
     }
     return false;
   }
@@ -754,7 +1021,7 @@
       state.structures.mineHead = true;
       state.unlocks.mining = true;
       state.stage = "mining";
-      log(state, "good", "简易掘进头完成。环境模型已经扩展为可向下开挖的二维剖面。");
+      log(state, "good", "简易掘进头完成。地表末端已经建立二叉矿路入口。");
     }
     if (id === "bench") {
       state.structures.bench = true;
@@ -788,7 +1055,31 @@
       state.stage = "industry";
       log(state, "good", "部件加工台投入使用。矿石可以转化为标准部件。");
     }
+    if (id === "anomalyResearch") {
+      state.research.modelVersion = RESEARCH_MODEL.version;
+      state.research.completed = true;
+      state.research.observations = RESEARCH_MODEL.observations.map((record) => ({ ...record }));
+      state.research.conclusions = RESEARCH_MODEL.conclusions.map((record) => ({ ...record }));
+      state.unlocks.research = true;
+      state.stage = "research";
+      log(state, "good", "第一版异常响应模型整理完成。");
+      log(state, "info", "残阵不是可直接使用的能源；需要主体接口才能验证意念响应。");
+    }
+    if (id === "lingchu") {
+      state.structures.lingchu = true;
+      state.inner = createInnerRuntime();
+      state.unlocks.inner = Boolean(state.inner);
+      state.stage = state.inner ? "awakening" : "research";
+      log(
+        state,
+        state.inner ? "good" : "bad",
+        state.inner
+          ? "灵触接口装配完成。机体获得了第一次受控接触未知场的可能。"
+          : "灵触接口装配完成，但内景内核尚未加载。",
+      );
+    }
   }
+
 
   function jobProgress(state) {
     if (!state.job) return 0;
@@ -798,7 +1089,7 @@
   function applyDerivedUnlocks(state) {
     if (state.milestones.manualHeartbeats >= 3) state.controllers.heart.available = true;
     if (state.milestones.manualMoves >= 3) state.controllers.drive.available = true;
-    if (state.milestones.chops >= 1) {
+    if (state.milestones.branchPickups >= 1 || state.milestones.chops >= 1) {
       state.controllers.pickup.available = true;
       state.unlocks.workshop = true;
     }
@@ -817,6 +1108,13 @@
     }
     if (state.anomaly.confirmed) {
       state.unlocks.anomaly = true;
+    }
+    if (state.research.completed) {
+      state.unlocks.research = true;
+    }
+    if (state.structures.lingchu) {
+      state.inner ??= createInnerRuntime();
+      state.unlocks.inner = Boolean(state.inner);
     }
   }
 
@@ -850,71 +1148,164 @@
     return next < 0 || next >= TRACK.length;
   }
 
+  function branchAtPosition(state) {
+    return state.world.depth === 0 && state.world.branches.includes(state.world.position);
+  }
+
   function treeAtPosition(state) {
     return state.world.depth === 0 && state.world.trees.includes(state.world.position);
   }
 
-  function harvestAvailable(state) {
-    return treeAtPosition(state);
+  function pickupAvailable(state) {
+    return branchAtPosition(state) || treeAtPosition(state);
   }
 
-  function mineCellKey(position, depth) {
-    return `${position}:${depth}`;
+  function woodGathered(state) {
+    return state.milestones.branchPickups + state.milestones.chops;
   }
 
-  function parseMineCellKey(key) {
+  function parseLegacyMineCellKey(key) {
     const [position, depth] = String(key).split(":").map(Number);
     return { position, depth };
   }
 
-  function validMineCellKey(key) {
-    const { position, depth } = parseMineCellKey(key);
+  function validLegacyMineCellKey(key) {
+    const { position, depth } = parseLegacyMineCellKey(key);
     return (
       Number.isInteger(position) &&
       Number.isInteger(depth) &&
       position >= 0 &&
       position < TRACK.length &&
       depth >= 1 &&
-      depth <= MINING_RULES.maxDepth &&
-      key === mineCellKey(position, depth)
+      depth <= 4 &&
+      key === `${position}:${depth}`
     );
   }
 
-  function cellExcavated(state, position, depth) {
-    return depth === 0 || state.world.excavated.includes(mineCellKey(position, depth));
+  function validMinePath(path) {
+    return (
+      typeof path === "string" &&
+      path.length >= 1 &&
+      path.length <= MINING_RULES.maxDepth &&
+      /^[LR]+$/.test(path)
+    );
   }
 
-  function oreAtCell(position, depth) {
-    return MINING_RULES.oreByCell[mineCellKey(position, depth)] ?? 0;
+  function compareMinePaths(left, right) {
+    return left.length - right.length || left.localeCompare(right);
   }
 
-  function digTarget(state) {
+  function addMinePathWithAncestors(paths, path) {
+    if (!validMinePath(path)) return;
+    for (let depth = 1; depth <= path.length; depth += 1) {
+      const ancestor = path.slice(0, depth);
+      if (!paths.includes(ancestor)) paths.push(ancestor);
+    }
+  }
+
+  function legacyMinePath(position, depth) {
+    let path = "";
+    for (let level = 0; level < depth; level += 1) {
+      path += (position >> (level % 4)) & 1 ? "R" : "L";
+    }
+    return path;
+  }
+
+  function restoreMineProgress(world, path, progress) {
+    if (!validMinePath(path) || world.mineNodes.includes(path)) return;
+    const parent = path.slice(0, -1);
+    if (parent && !world.mineNodes.includes(parent)) return;
+    world.mineProgress[path] = Math.floor(
+      finite(progress, 0, hardnessAtDepth(path.length) - 1),
+    );
+  }
+
+  function hardnessAtDepth(depth) {
+    return Math.min(
+      MINING_RULES.maxHardness,
+      MINING_RULES.baseHardness +
+        Math.floor((Math.max(1, depth) - 1) / MINING_RULES.hardnessDepthStep),
+    );
+  }
+
+  function materialAtDepth(depth) {
+    return (
+      MINING_RULES.baseMaterial +
+      Math.floor((Math.max(1, depth) - 1) / MINING_RULES.materialDepthStep)
+    );
+  }
+
+  function pathHash(path) {
+    let hash = 2166136261;
+    for (const character of path) {
+      hash ^= character.charCodeAt(0);
+      hash = Math.imul(hash, 16777619);
+    }
+    return hash >>> 0;
+  }
+
+  function oreAtPath(path) {
+    if (!validMinePath(path) || path.length < MINING_RULES.guaranteedOreDepth) return 0;
+    if (path === TRACK.anomalyPath) return 4;
+    if (path.length === MINING_RULES.guaranteedOreDepth) return 2;
+    return pathHash(path) % MINING_RULES.oreFrequency === 0
+      ? 1 + Math.floor(path.length / 4)
+      : 0;
+  }
+
+  function mineTargetPath(state, branch) {
+    if (branch !== "L" && branch !== "R") return null;
     if (state.world.depth >= MINING_RULES.maxDepth) return null;
-    return {
-      position: state.world.position,
-      depth: state.world.depth + 1,
-    };
+    if (state.world.depth === 0 && state.world.position !== TRACK.mineEntrance) return null;
+    return `${state.world.minePath ?? ""}${branch}`;
   }
 
-  function canDigDown(state) {
+  function canDigBranch(state, branch) {
     if (!state.unlocks.mining || !state.structures.mineHead || state.shutdown) return false;
-    const target = digTarget(state);
+    const target = mineTargetPath(state, branch);
     if (!target) return false;
-    const energy = cellExcavated(state, target.position, target.depth)
+    const energy = state.world.mineNodes.includes(target)
       ? MINING_RULES.verticalMoveEnergy
       : MINING_RULES.digEnergy;
     return state.resources.energy + 0.0001 >= energy;
   }
 
-  function digProgress(state) {
-    const target = digTarget(state);
-    if (!target || cellExcavated(state, target.position, target.depth)) {
+  function mineBranchProgress(state, branch) {
+    const target = mineTargetPath(state, branch);
+    if (!target || state.world.mineNodes.includes(target)) {
       return { current: 0, required: 0, ratio: 0, open: Boolean(target) };
     }
-    const current = state.world.digProgress[mineCellKey(target.position, target.depth)] ?? 0;
-    const required = MINING_RULES.hardnessByDepth[target.depth];
-    return { current, required, ratio: current / required, open: false };
+    const current = state.world.mineProgress[target] ?? 0;
+    const required = hardnessAtDepth(target.length);
+    return { current, required, ratio: current / required, open: false, path: target };
   }
+
+  function visibleMineNodes(state) {
+    if (state.world.depth === 0 && state.world.position !== TRACK.mineEntrance) return [];
+    const root = state.world.minePath ?? "";
+    return state.world.mineNodes.filter((path) => path.startsWith(root));
+  }
+
+  function nextBranchRespawnMs(state) {
+    const timers = Object.values(state.world.branchRespawn).filter((value) => value > 0);
+    return timers.length > 0 ? Math.min(...timers) : 0;
+  }
+
+  function advanceBranches(state, deltaMs) {
+    for (const position of TRACK.branches) {
+      if (state.world.branches.includes(position)) continue;
+      const remaining =
+        (state.world.branchRespawn[position] ?? FOREST_RULES.branchRespawnMs) - deltaMs;
+      if (remaining <= 0) {
+        state.world.branches.push(position);
+        state.world.branches.sort((left, right) => left - right);
+        delete state.world.branchRespawn[position];
+      } else {
+        state.world.branchRespawn[position] = remaining;
+      }
+    }
+  }
+
 
   function nextTreeRespawnMs(state) {
     const timers = Object.values(state.world.treeRespawn).filter((value) => value > 0);
@@ -924,7 +1315,8 @@
   function advanceTrees(state, deltaMs) {
     for (const position of TRACK.trees) {
       if (state.world.trees.includes(position)) continue;
-      const remaining = (state.world.treeRespawn[position] ?? 0) - deltaMs;
+      const remaining =
+        (state.world.treeRespawn[position] ?? FOREST_RULES.treeRespawnMs) - deltaMs;
       if (remaining <= 0) {
         state.world.trees.push(position);
         delete state.world.treeRespawn[position];
@@ -954,6 +1346,60 @@
       }
     }
   }
+  function advanceInner(state, deltaMs) {
+    const runtime = state.inner;
+    const kernel = global.SilidoxInnerLandscape;
+    if (!runtime?.active || !kernel || runtime.pulseMs <= 0) return;
+
+    const eventStart = Math.min(runtime.lastEventCount, runtime.kernel.events.length);
+    const stepMs = Math.min(deltaMs, runtime.pulseMs);
+    kernel.advance(runtime.kernel, stepMs);
+    runtime.pulseMs = Math.max(0, runtime.pulseMs - stepMs);
+    runtime.lastEventCount = runtime.kernel.events.length;
+    if (runtime.pulseMs > 0) return;
+
+    runtime.active = false;
+    runtime.manualPulses = Math.min(
+      INNER_RULES.manualPulsesRequired,
+      runtime.manualPulses + 1,
+    );
+    const newEvents = runtime.kernel.events.slice(eventStart);
+    const touch = kernel.getMetrics(runtime.kernel, "touch");
+    const refine = kernel.getMetrics(runtime.kernel, "refine");
+    const dantian = kernel.getMetrics(runtime.kernel, "dantian");
+    runtime.observations.push({
+      id: `pulse-${runtime.manualPulses}`,
+      pulse: runtime.manualPulses,
+      atStep: runtime.kernel.clock.stepCount,
+      touchPressure: touch?.pressure ?? 0,
+      refinePressure: refine?.pressure ?? 0,
+      dantianPressure: dantian?.pressure ?? 0,
+      purity: touch?.purity ?? 1,
+      temperature: refine?.temperature ?? 20,
+      stability: refine?.stability ?? 100,
+      faults: [...runtime.kernel.faults],
+      eventCount: newEvents.length,
+    });
+    if (runtime.observations.length > 12) {
+      runtime.observations.splice(0, runtime.observations.length - 12);
+    }
+    if (newEvents.length > 0) {
+      log(state, "warn", `引灵脉冲记录到异常：${newEvents[0].text}`);
+    } else {
+      log(
+        state,
+        "good",
+        `低功率引灵完成 ${runtime.manualPulses}/${INNER_RULES.manualPulsesRequired} 次，灵触响应已记录。`,
+      );
+    }
+    if (
+      runtime.manualPulses >= INNER_RULES.manualPulsesRequired &&
+      state.stage === "awakening"
+    ) {
+      state.stage = "inner";
+      log(state, "good", "三次低功率引灵完成。内景已经可以进行持续观测。");
+    }
+  }
 
   function objective(state) {
     if (state.shutdown) {
@@ -962,35 +1408,64 @@
         : "机体处于低功耗停机，等待应急热差电容回充。";
     }
     if (!state.unlocks.environment) return "手动释放三次核心脉冲，让机体恢复响应。";
-    if (state.milestones.chops === 0) return "沿森林地表移动，找到成熟树木并完成第一次伐木。";
+    if (woodGathered(state) === 0) return "沿森林地表移动，拾取掉落的树枝，收集第一批木材。";
     if (state.milestones.fuelBurns === 0 && !state.structures.bench) {
       return "燃烧一份木材补充能源，再决定多少木材留作建设。";
     }
-    if (!state.structures.mineHead) return "继续伐木，用木材装配简易掘进头。";
-    if (state.milestones.digs === 0) return "选择一个地表位置，向下击穿第一层岩体。";
+    if (!state.structures.mineHead) return "继续搜集木材，用木材装配简易掘进头。";
+    if (state.milestones.digs === 0) {
+      return `抵达横向 ${TRACK.mineEntrance} 的矿井入口，选择左下或右下击穿第一层岩体。`;
+    }
     if (!state.structures.bench) return "继续向下挖掘，取得足够结构料搭建基础维修台。";
     if (!state.structures.generator) return "搭建木气化炉，让木材可以自动转化为能源。";
     if (!state.structures.sensor) return "修复频谱传感器，检查环境中的未知输出。";
     if (!state.anomaly.confirmed) {
       if (
-        state.world.position !== TRACK.anomaly ||
-        state.world.depth !== TRACK.anomalyDepth
+        state.world.minePath !== TRACK.anomalyPath
       ) {
-        return `频谱信号来自横向 ${TRACK.anomaly}、深度 ${TRACK.anomalyDepth}。开掘通道抵达现场。`;
+        return `频谱信号来自矿路 ${TRACK.anomalyPath}。沿右、左、右、右分支抵达现场。`;
       }
       return "对地下残阵完成三次独立采样，排除传感器误差。";
     }
     if (!state.structures.processor) {
       return "搭建部件加工台，把矿石加工成标准部件。";
     }
-    return "部件是灵性接口与内景部件的基础材料。维持生产，并寻找解释异常的方法。";
+    if (!state.research.completed) {
+      return state.industry.batches < 1
+        ? "让加工台完成第一批标准部件，再整理残阵的异常响应模型。"
+        : "整理第一版异常响应模型，确认未知场是否具备可控响应。";
+    }
+    if (!state.structures.lingchu) {
+      return "用标准部件装配灵触接口，让机体第一次尝试受控接触未知场。";
+    }
+    if ((state.inner?.manualPulses ?? 0) < INNER_RULES.manualPulsesRequired) {
+      return `释放三次低功率引灵脉冲，记录灵触响应 ${state.inner?.manualPulses ?? 0}/${INNER_RULES.manualPulsesRequired}。`;
+    }
+    return "维持低功率引灵，观察灵压、杂质、温度与稳定度的变化。";
+  }
+
+  function innerMetrics(state) {
+    const runtime = state.inner;
+    const kernel = global.SilidoxInnerLandscape;
+    if (!runtime?.kernel || !kernel?.getMetrics) return null;
+    return {
+      active: runtime.active,
+      pulseMs: runtime.pulseMs,
+      manualPulses: runtime.manualPulses,
+      touch: kernel.getMetrics(runtime.kernel, "touch"),
+      refine: kernel.getMetrics(runtime.kernel, "refine"),
+      dantian: kernel.getMetrics(runtime.kernel, "dantian"),
+      faults: [...runtime.kernel.faults],
+      events: runtime.kernel.events.slice(-8),
+      observations: runtime.observations.slice(-8),
+    };
   }
 
   function stageProgress(state) {
     if (state.stage === "recovery") return state.milestones.manualHeartbeats / 3;
     if (state.stage === "survival") {
       return (
-        Math.min(2, state.milestones.chops) + Math.min(1, state.milestones.fuelBurns)
+        Math.min(2, woodGathered(state)) + Math.min(1, state.milestones.fuelBurns)
       ) / 3;
     }
     if (state.stage === "stabilization") return state.structures.bench ? 1 : 0.4;
@@ -1000,6 +1475,11 @@
     }
     if (state.stage === "observation") return state.anomaly.samples / 3;
     if (state.stage === "industry") return Math.min(1, state.industry.batches / 8);
+    if (state.stage === "research") return state.research.completed ? 1 : 0;
+    if (state.stage === "awakening") {
+      return (state.inner?.manualPulses ?? 0) / INNER_RULES.manualPulsesRequired;
+    }
+    if (state.stage === "inner") return 1;
     return 1;
   }
 
@@ -1013,15 +1493,21 @@
     jobAvailable,
     jobProgress,
     objective,
+    innerMetrics,
     stageProgress,
     atBoundary,
     treeAtPosition,
-    harvestAvailable,
+    branchAtPosition,
+    pickupAvailable,
+    nextBranchRespawnMs,
     nextTreeRespawnMs,
-    cellExcavated,
-    oreAtCell,
-    digTarget,
-    canDigDown,
-    digProgress,
+    validMinePath,
+    hardnessAtDepth,
+    materialAtDepth,
+    oreAtPath,
+    mineTargetPath,
+    canDigBranch,
+    mineBranchProgress,
+    visibleMineNodes,
   });
 })(globalThis);

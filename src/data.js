@@ -28,12 +28,16 @@
     length: 9,
     start: 0,
     trees: [2, 5, 7],
-    anomaly: 8,
-    anomalyDepth: 4,
+    branches: [0, 1, 3, 4, 6, 8],
+    mineEntrance: 8,
+    anomalyPath: "RLRR",
   };
 
   const FOREST_RULES = {
-    treeRespawnMs: 12000,
+    branchRespawnMs: 60000,
+    treeRespawnMs: 300000,
+    initialTreeGrowthMs: 180000,
+    woodPerBranch: 4,
     woodPerTree: 4,
     manualBurnWood: 1,
     energyPerWood: 8,
@@ -48,26 +52,61 @@
     heartbeatRestore: 25,
     moveEnergy: 0.5,
     reverseEnergy: 0.1,
-    harvestEnergy: 0.5,
+    pickupEnergy: 0.5,
     emergencyRechargeMs: 2000,
     emergencyPulsesRequired: 3,
     controlEnergyPerWork: 0.002,
     controllerScanMs: 1000,
   };
 
+  const branchSweepDistance = TRACK.branches.reduce(
+    (distance, position, index) =>
+      index === 0
+        ? distance
+        : distance + Math.abs(position - TRACK.branches[index - 1]),
+    0,
+  );
+  const FOREST_MODEL = Object.freeze({
+    branchSites: TRACK.branches.length,
+    branchWoodPerCycle: TRACK.branches.length * FOREST_RULES.woodPerBranch,
+    branchWoodPerMinute:
+      (TRACK.branches.length *
+        FOREST_RULES.woodPerBranch *
+        60000) /
+      FOREST_RULES.branchRespawnMs,
+    maxGeneratorWoodPerMinute:
+      (FOREST_RULES.generatorEnergyPerSecond * 60) /
+      FOREST_RULES.energyPerWood,
+    branchSupplyToGeneratorRatio:
+      ((TRACK.branches.length *
+        FOREST_RULES.woodPerBranch *
+        60000) /
+        FOREST_RULES.branchRespawnMs) /
+      ((FOREST_RULES.generatorEnergyPerSecond * 60) /
+        FOREST_RULES.energyPerWood),
+    initialSweepEnergy:
+      3 * SURVIVAL_RULES.manualHeartbeatEnergy +
+      branchSweepDistance * SURVIVAL_RULES.moveEnergy +
+      TRACK.branches.length * SURVIVAL_RULES.pickupEnergy,
+    initialEnergyAfterSweep:
+      STARTING_RESOURCES.energy -
+      (3 * SURVIVAL_RULES.manualHeartbeatEnergy +
+        branchSweepDistance * SURVIVAL_RULES.moveEnergy +
+        TRACK.branches.length * SURVIVAL_RULES.pickupEnergy),
+  });
+
   const MINING_RULES = {
-    maxDepth: 4,
+    maxDepth: 12,
     digEnergy: 1,
     verticalMoveEnergy: 0.2,
-    hardnessByDepth: [0, 2, 3, 4, 5],
-    materialByDepth: [0, 2, 2, 3, 3],
-    oreByCell: Object.freeze({
-      "1:3": 2,
-      "2:2": 2,
-      "5:3": 3,
-      "7:2": 2,
-      "8:4": 4,
-    }),
+    baseHardness: 2,
+    hardnessDepthStep: 2,
+    maxHardness: 8,
+    baseMaterial: 2,
+    materialDepthStep: 3,
+    guaranteedOreDepth: 2,
+    oreFrequency: 4,
+    maxViewZoom: 1.65,
   };
 
   const INDUSTRY_RULES = {
@@ -75,6 +114,44 @@
     processorRecipeParts: 1,
     processorCycleMs: 5000,
   };
+
+  const INNER_RULES = {
+    pulseEnergy: 0.5,
+    pulseDurationMs: 1000,
+    manualPulsesRequired: 3,
+  };
+  const RESEARCH_MODEL = Object.freeze({
+    version: 1,
+    observations: [
+      {
+        id: "repeatability",
+        label: "响应重复性",
+        value: "三次独立采样一致",
+        confidence: "confirmed",
+      },
+      {
+        id: "balance",
+        label: "输入与输出",
+        value: "可测物理输入不足以解释输出",
+        confidence: "confirmed",
+      },
+      {
+        id: "control",
+        label: "控制响应",
+        value: "尚未建立主体接口",
+        confidence: "unknown",
+      },
+    ],
+    conclusions: [
+      {
+        id: "unknown-field",
+        label: "第一版结论",
+        value: "存在可重复观测的未知场增量，但尚不能感知、储存或利用。",
+        confidence: "provisional",
+      },
+    ],
+  });
+
 
   const CONTROLLERS = {
     heart: {
@@ -97,12 +174,12 @@
     },
     pickup: {
       id: "pickup",
-      name: "伐木控制器",
+      name: "拾取控制器",
       programId: "environment.pickup",
       cost: { resource: "wood", amount: 2 },
       presetIntervalMs: 1000,
       presetLoad: 2,
-      unlockHint: "第一次手动伐木后可安装",
+      unlockHint: "第一次拾取掉落树枝后可安装",
     },
     excavator: {
       id: "excavator",
@@ -115,7 +192,7 @@
     },
   };
 
-  const JOBS = {
+  const JOBS = Object.freeze({
     mineHead: {
       id: "mineHead",
       name: "装配简易掘进头",
@@ -146,13 +223,31 @@
       durationMs: 120000,
       cost: { resource: "material", amount: 4 },
     },
+    anomalyResearch: {
+      id: "anomalyResearch",
+      name: "整理异常响应模型",
+      durationMs: 30000,
+      cost: { resource: "parts", amount: 1 },
+    },
+    lingchu: {
+      id: "lingchu",
+      name: "装配灵触接口",
+      durationMs: 60000,
+      cost: { resource: "parts", amount: 4 },
+    },
     anomalySample: {
       id: "anomalySample",
       name: "采样残阵输出",
       durationMs: 20000,
       cost: null,
     },
-  };
+  });
+
+  const PROGRESSION_RULES = Object.freeze({
+    openingMinMs: 6 * 60 * 1000,
+    openingMaxMs: 10 * 60 * 1000,
+    manualActionWindowMs: 1700,
+  });
 
   const CONTROL_CONTEXTS = {
     "body.heart": {
@@ -179,27 +274,30 @@
       outputs: [
         { id: "Q0", name: "向前移动", action: "DRIVE" },
         { id: "Q1", name: "切换方向", action: "REVERSE" },
-        { id: "Q2", name: "向上返回", action: "ASCEND" },
+        { id: "Q2", name: "向上", action: "ASCEND" },
       ],
     },
     "environment.pickup": {
       id: "environment.pickup",
       controllerId: "pickup",
-      name: "环境 / 地表伐木",
-      description: "仅在地表当前位置存在成熟树木时执行伐木。",
-      inputs: [{ id: "I0", name: "成熟树木", signal: "TREE_PRESENT" }],
-      outputs: [{ id: "Q0", name: "执行伐木", action: "HARVEST" }],
+      name: "环境 / 林地拾取",
+      description: "优先拾取当前位置掉落的树枝；树木再生后可进行伐木。",
+      inputs: [{ id: "I0", name: "存在可拾取目标", signal: "PICKUP_PRESENT" }],
+      outputs: [{ id: "Q0", name: "拾取目标", action: "PICKUP" }],
     },
     "environment.excavator": {
       id: "environment.excavator",
       controllerId: "excavator",
-      name: "环境 / 向下采掘",
-      description: "在当前横向位置持续掘进，击穿岩层后进入下一深度。",
+      name: "环境 / 分支采掘",
+      description: "从当前节点选择左下或右下分支，击穿岩层后进入新节点。",
       inputs: [
-        { id: "I0", name: "可以向下", signal: "CAN_DIG_DOWN" },
-        { id: "I1", name: "下层含矿", signal: "ORE_BELOW" },
+        { id: "I0", name: "左下可掘进", signal: "CAN_DIG_LEFT" },
+        { id: "I1", name: "右下可掘进", signal: "CAN_DIG_RIGHT" },
       ],
-      outputs: [{ id: "Q0", name: "向下掘进", action: "DIG_DOWN" }],
+      outputs: [
+        { id: "Q0", name: "向左下掘进", action: "DIG_LEFT" },
+        { id: "Q1", name: "向右下掘进", action: "DIG_RIGHT" },
+      ],
     },
   };
 
@@ -217,6 +315,9 @@
     observation: "异常观测",
     anomaly: "非守恒证据",
     industry: "工业",
+    research: "灵气研究",
+    awakening: "启灵",
+    inner: "内景",
   };
 
   global.SilidoxData = Object.freeze({
@@ -229,11 +330,15 @@
     STARTING_RESOURCES,
     TRACK,
     FOREST_RULES,
+    FOREST_MODEL,
     MINING_RULES,
     SURVIVAL_RULES,
     INDUSTRY_RULES,
+    INNER_RULES,
+    RESEARCH_MODEL,
     CONTROLLERS,
     JOBS,
+    PROGRESSION_RULES,
     CONTROL_CONTEXTS,
     LOGIC_CONSTANTS,
     STAGE_LABELS,

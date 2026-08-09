@@ -85,6 +85,9 @@
         <button class="workspace-tab anomaly-tab" data-workspace="anomaly" id="anomalyTab" hidden>
           未知阵法
         </button>
+        <button class="workspace-tab inner-tab" data-workspace="inner" id="innerTab" hidden>
+          内景
+        </button>
       </nav>
 
       <main class="workspace-root">
@@ -144,7 +147,7 @@
               <span>外部执行器</span>
               <h2 id="environmentTitle">森林地表</h2>
             </div>
-            <p id="environmentDescription">地表没有障碍物。移动、掉头并反复伐木，在建设材料与燃料能源之间分配木材。</p>
+            <p id="environmentDescription">初期沿森林地表拾取掉落树枝。成熟树木再生很慢，后续伐木只能作为长期补给。</p>
           </header>
 
           <section class="track-console" aria-labelledby="trackTitle">
@@ -158,25 +161,45 @@
 
             <div class="track" id="track" aria-label="森林地表"></div>
 
-            <div class="mining-readout" id="miningReadout" hidden>
-              <div>
-                <span id="miningTarget">目标岩层</span>
-                <strong id="miningProgressText">0 / 2</strong>
+            <div class="mine-viewport" id="mineViewport" hidden>
+              <div class="mine-heading">
+                <div>
+                  <span>当前矿路</span>
+                  <strong id="minePathReadout">入口</strong>
+                </div>
+                <small id="mineDepthReadout">深度 0 / 12</small>
               </div>
-              <div class="mining-progress" role="progressbar" aria-label="掘进进度">
-                <i id="miningProgressBar"></i>
+              <div class="mine-tree-scroll">
+                <div class="mine-tree" id="mineTree" aria-label="当前节点及已挖掘子树"></div>
+              </div>
+              <div class="branch-progress-grid">
+                <div class="branch-progress">
+                  <span id="leftMiningTarget">左下岩层</span>
+                  <strong id="leftMiningProgressText">0 / 2</strong>
+                  <div class="mining-progress" role="progressbar" aria-label="左下掘进进度">
+                    <i id="leftMiningProgressBar"></i>
+                  </div>
+                </div>
+                <div class="branch-progress">
+                  <span id="rightMiningTarget">右下岩层</span>
+                  <strong id="rightMiningProgressText">0 / 2</strong>
+                  <div class="mining-progress" role="progressbar" aria-label="右下掘进进度">
+                    <i id="rightMiningProgressBar"></i>
+                  </div>
+                </div>
               </div>
             </div>
 
             <div class="manual-controls" aria-label="手动环境操作">
               <button id="moveBtn">向前一步</button>
               <button id="reverseBtn">掉头</button>
-              <button class="primary-button" id="pickupBtn">伐木</button>
+              <button class="primary-button" id="pickupBtn">拾取树枝</button>
               <button id="burnWoodBtn">燃烧 1 木材 · +8 能源</button>
-              <button class="primary-button" id="digBtn" hidden>向下掘进</button>
-              <button id="ascendBtn" hidden>沿竖井上升</button>
+              <button class="primary-button" id="digLeftBtn" hidden>向左下掘进</button>
+              <button class="primary-button" id="digRightBtn" hidden>向右下掘进</button>
+              <button id="ascendBtn" hidden>向上</button>
             </div>
-            <p class="context-hint" id="environmentHint">当前位置没有可采集目标。继续沿林地移动。</p>
+            <p class="context-hint" id="environmentHint">沿森林地表移动，寻找掉落的树枝。</p>
           </section>
 
           <section class="controller-section environment-controllers" aria-labelledby="environmentControlTitle">
@@ -237,6 +260,95 @@
             <div><dt>当前可用</dt><dd>否</dd></div>
             <div><dt>下一步</dt><dd>寻找解释</dd></div>
           </dl>
+          <section class="research-console" aria-labelledby="researchTitle">
+            <div class="section-heading">
+              <div>
+                <span>只读模型</span>
+                <h3 id="researchTitle">第一版异常响应模型</h3>
+              </div>
+              <strong id="researchModelStatus">尚未整理</strong>
+            </div>
+            <p id="researchDescription">
+              先用标准部件整理观测数据，再决定是否能制造主体接口。模型不会把未知场直接显示成可用资源。
+            </p>
+            <div class="observation-list" id="researchObservationList"></div>
+          </section>
+        </section>
+
+        <section class="workspace-view inner-workspace" data-workspace-view="inner" hidden>
+          <header class="workspace-heading">
+            <div>
+              <span>人工灵根原型</span>
+              <h2>灵触与内景</h2>
+            </div>
+            <p id="innerDescription">
+              灵触是机体第一次接触未知场的受控接口。先用低功率脉冲观察灵流，不要把未知输出当作免费能源。
+            </p>
+          </header>
+
+          <section class="inner-console" aria-labelledby="innerConsoleTitle">
+            <div class="section-heading">
+              <div>
+                <span>启灵实验</span>
+                <h3 id="innerConsoleTitle">低功率引灵</h3>
+              </div>
+              <strong id="innerPulseCount">0 / 3</strong>
+            </div>
+            <button class="primary-action" id="innerPulseBtn">
+              <strong>低功率引灵脉冲</strong>
+              <span>消耗 0.5 能源，运行 1 秒</span>
+            </button>
+            <p id="innerHint">完成三次脉冲，记录灵触响应。</p>
+          </section>
+
+          <dl class="inner-metrics">
+            <div>
+              <dt>灵触压力</dt>
+              <dd id="innerTouchPressure">—</dd>
+            </div>
+            <div>
+              <dt>炼化压力</dt>
+              <dd id="innerRefinePressure">—</dd>
+            </div>
+            <div>
+              <dt>人工丹田</dt>
+              <dd id="innerDantianPressure">—</dd>
+            </div>
+            <div>
+              <dt>纯度</dt>
+              <dd id="innerPurity">—</dd>
+            </div>
+            <div>
+              <dt>温度</dt>
+              <dd id="innerTemperature">—</dd>
+            </div>
+            <div>
+              <dt>稳定度</dt>
+              <dd id="innerStability">—</dd>
+            </div>
+          </dl>
+
+          <section class="inner-events" aria-labelledby="innerEventsTitle">
+            <div class="section-heading">
+              <div>
+                <span>证据与保护</span>
+                <h3 id="innerEventsTitle">内景事件</h3>
+              </div>
+            </div>
+            <p id="innerFaultText">尚未运行引灵脉冲。</p>
+            <div class="inner-event-list" id="innerEventList"></div>
+          </section>
+
+          <section class="inner-observations" aria-labelledby="innerObservationsTitle">
+            <div class="section-heading">
+              <div>
+                <span>可复现实验记录</span>
+                <h3 id="innerObservationsTitle">脉冲观测</h3>
+              </div>
+              <strong id="innerObservationStatus">0 / 3</strong>
+            </div>
+            <div class="inner-observation-list" id="innerObservationList"></div>
+          </section>
         </section>
       </main>
 

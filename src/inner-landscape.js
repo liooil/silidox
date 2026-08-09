@@ -86,6 +86,82 @@
       clock: { elapsedMs: 0, stepCount: 0, paused: false },
     };
   }
+  function normalizeInnerState(value) {
+    const base = createInnerState();
+    if (!value || typeof value !== "object") return base;
+
+    base.external.pressure = finiteNumber(value.external?.pressure, 60, 0, 300);
+    base.external.impurity = finiteNumber(value.external?.impurity, 0.05, 0, 1);
+
+    for (const definition of CIRCUIT.nodes) {
+      const target = base.nodes[definition.id];
+      const source = value.nodes?.[definition.id];
+      if (!source || typeof source !== "object") continue;
+      target.pressure = finiteNumber(source.pressure, 0, 0, definition.capacity);
+      target.temperature = finiteNumber(source.temperature, AMBIENT_TEMPERATURE, 0, 300);
+      target.impurity = finiteNumber(source.impurity, 0, 0, 100);
+      target.stability = finiteNumber(source.stability, 100, 0, 100);
+      target.history = Array.isArray(source.history)
+        ? source.history
+            .slice(-8)
+            .map((item) => finiteNumber(item, 0, 0, definition.capacity))
+        : [];
+      if (definition.id === "filter") {
+        target.trapped = finiteNumber(source.trapped, 0, 0, Number.MAX_SAFE_INTEGER);
+      }
+      if (definition.id === "refine") {
+        target.converted = finiteNumber(source.converted, 0, 0, Number.MAX_SAFE_INTEGER);
+      }
+      if (definition.id === "dantian") {
+        target.stored = finiteNumber(source.stored, 0, 0, DANTIAN_CAPACITY);
+      }
+    }
+
+    for (const definition of CIRCUIT.nodes) {
+      base.flows[definition.id] = finiteNumber(
+        value.flows?.[definition.id],
+        0,
+        0,
+        Number.MAX_SAFE_INTEGER,
+      );
+    }
+    base.control.mode = ["quiet", "battle", "burst"].includes(value.control?.mode)
+      ? value.control.mode
+      : "quiet";
+    base.control.reliefOpen = clamp01(Number(value.control?.reliefOpen) || 0);
+    base.control.purgeOpen = clamp01(Number(value.control?.purgeOpen) || 0);
+    base.faults = Array.isArray(value.faults)
+      ? value.faults.filter((item) => typeof item === "string").slice(-40)
+      : [];
+    base.events = Array.isArray(value.events)
+      ? value.events
+          .filter((event) => event && typeof event === "object")
+          .slice(-80)
+          .map((event) => ({
+            atStep: Math.floor(finiteNumber(event.atStep, 0, 0, Number.MAX_SAFE_INTEGER)),
+            kind: typeof event.kind === "string" ? event.kind : "unknown",
+            node: typeof event.node === "string" ? event.node : "",
+            text: typeof event.text === "string" ? event.text : "",
+          }))
+      : [];
+    base.clock.elapsedMs = finiteNumber(
+      value.clock?.elapsedMs,
+      0,
+      0,
+      Number.MAX_SAFE_INTEGER,
+    );
+    base.clock.stepCount = Math.floor(
+      finiteNumber(value.clock?.stepCount, 0, 0, Number.MAX_SAFE_INTEGER),
+    );
+    base.clock.paused = Boolean(value.clock?.paused);
+    return base;
+  }
+
+  function finiteNumber(value, fallback, min, max) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return fallback;
+    return Math.min(max, Math.max(min, number));
+  }
 
   function advance(inner, deltaMs) {
     if (!inner || inner.clock.paused || deltaMs <= 0) return inner;
@@ -287,6 +363,7 @@
     STEP_MS,
     NODE_TYPES,
     createInnerState,
+    normalizeInnerState,
     advance,
     applyControl,
     setExternal,
