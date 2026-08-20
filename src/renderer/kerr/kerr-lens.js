@@ -1,4 +1,4 @@
-// Diagnostic source plane and Schwarzschild reverse ray tracing shaders.
+// Star/diagnostic source sampling with a Schwarzschild baseline and visual Kerr correction.
 // Orbit invariant and critical capture condition follow the model described in:
 // https://ebruneton.github.io/black_hole_shader/
 (function defineSilidoxKerrLens(global) {
@@ -111,7 +111,7 @@ fn rayPlaneToScreen(point: vec2f) -> vec2f {
   return vec2f(unrolled.x, -unrolled.y) + scene.lens.xy;
 }
 
-fn sampleEscapedGrid(origin: vec3f, direction: vec3f) -> vec3f {
+fn sampleEscapedGrid(origin: vec3f, direction: vec3f, winding: f32) -> vec3f {
   if (abs(direction.z) < 0.00001) {
     return vec3f(0.002, 0.005, 0.009);
   }
@@ -121,7 +121,16 @@ fn sampleEscapedGrid(origin: vec3f, direction: vec3f) -> vec3f {
     return vec3f(0.002, 0.005, 0.009);
   }
   let hit = origin + direction * travel;
-  return sampleGrid(screenToGridUv(rayPlaneToScreen(hit.xy)));
+  let uv = screenToGridUv(rayPlaneToScreen(hit.xy));
+  let imageOrder = clamp(abs(winding) / TAU, 0.0, 3.0);
+  let texel = 1.0 / max(scene.viewport_time.xy, vec2f(1.0));
+  let spread = texel * (0.35 + imageOrder * 1.35);
+  var color = sampleGrid(uv) * 0.50;
+  color += sampleGrid(uv + vec2f(spread.x, 0.0)) * 0.125;
+  color += sampleGrid(uv - vec2f(spread.x, 0.0)) * 0.125;
+  color += sampleGrid(uv + vec2f(0.0, spread.y)) * 0.125;
+  color += sampleGrid(uv - vec2f(0.0, spread.y)) * 0.125;
+  return color;
 }
 
 fn positiveModulo(value: f32, period: f32) -> f32 {
@@ -130,6 +139,20 @@ fn positiveModulo(value: f32, period: f32) -> f32 {
 
 fn wrappedAngleDifference(previous: f32, current: f32) -> f32 {
   return positiveModulo(current - previous + PI, TAU) - PI;
+}
+
+fn rotateAroundAxis(value: vec3f, axis: vec3f, angle: f32) -> vec3f {
+  let c = cos(angle);
+  let s = sin(angle);
+  return value * c + cross(axis, value) * s + axis * dot(axis, value) * (1.0 - c);
+}
+
+// Real-time visual Kerr correction applied on top of the stable Schwarzschild
+// orbit baseline. This is not an exact Kerr geodesic solver.
+fn pseudoKerrAcceleration(u: f32, kerrBias: f32) -> f32 {
+  let schwarzschild = 1.5 * u * u - u;
+  let frameDragging = kerrBias * 0.18 * u * u * u;
+  return schwarzschild + frameDragging;
 }
 
 fn blackbody(temperature: f32) -> vec3f {
@@ -242,7 +265,7 @@ fn sampleMagnetosphere(position: vec3f, time: f32) -> vec4f {
   let azimuth = atan2(planar.z, planar.x);
   let pulse = 0.58 + 0.42 * sin(height * 2.8 - time * 3.7 + azimuth * 3.0);
   let density = shell * max(pulse, 0.0) * smoothstep(0.72, 1.0, scene.construction.x);
-  return vec4f(vec3f(0.004, 0.018, 0.065) * density, density * 0.0025);
+  return vec4f(vec3f(0.020, 0.125, 0.62) * density, density * 0.0065);
 }
 
 fn sampleRingSource(origin: vec3f, direction: vec3f, winding: f32) -> RingSample {
@@ -280,16 +303,22 @@ fn sampleRingSource(origin: vec3f, direction: vec3f, winding: f32) -> RingSample
   let imageOrder = floor(abs(winding) / TAU + 0.45);
   let orderGain = exp(-imageOrder * 0.46);
   let metal = mix(vec3f(0.035, 0.042, 0.052), vec3f(0.42, 0.34, 0.23), moduleBody);
+  let frontierAngle = scene.construction.x * TAU - 2.22;
+  let frontierOffset = wrappedAngleDifference(frontierAngle, phi);
+  let constructionUnits = exp(-pow(frontierOffset / 0.18, 2.0))
+    * (0.42 + 0.58 * pow(max(cos(modulePhase * TAU), 0.0), 18.0));
+  let maintenanceUnits = pow(max(0.5 + 0.5 * cos(arcProgress * TAU * 36.0 - scene.viewport_time.z * 0.7), 0.0), 72.0);
   let emission = built * orderGain * (
     metal * (0.72 + rail * 1.18)
       + vec3f(2.4, 0.70, 0.075) * collector * 1.42
       + vec3f(0.20, 0.78, 2.10) * navigation * 1.12
+      + vec3f(0.18, 0.72, 2.60) * (constructionUnits * 1.35 + maintenanceUnits * 0.42)
   );
   return RingSample(emission, built * clamp(moduleBody + rail, 0.0, 1.0));
 }
 
-fn photonRingHint(minimumRadius: f32) -> f32 {
-  let delta = minimumRadius - PHOTON_RADIUS;
+fn photonRingHint(minimumRadius: f32, criticalRadius: f32) -> f32 {
+  let delta = minimumRadius - criticalRadius;
   return exp(-(delta * delta) / 0.0028);
 }
 
@@ -319,32 +348,38 @@ fn fragment_main(@builtin(position) frag: vec4f) -> @location(0) vec4f {
   var u = inverseBoundary;
   var uDot = entryZ / (boundary * max(impact, 0.00001));
   let eSquare = uDot * uDot + u * u * (1.0 - u);
-  var position = orbitPosition(u, phi, impactDirection);
-  var direction = orbitDirection(u, uDot, phi, impactDirection);
   let inclination = scene.camera.x;
   let diskNormal = vec3f(0.0, sin(inclination), cos(inclination));
+  let spin = clamp(scene.construction.z, -0.99, 0.99);
+  let orbitSide = clamp(rayPlane.x / max(impact, 0.00001), -1.0, 1.0);
+  let kerrBias = spin * sin(inclination) * orbitSide;
+  let criticalESquare = CRITICAL_E_SQUARE * clamp(1.0 - kerrBias * 0.20, 0.76, 1.24);
+  var draggingAngle = 0.0;
+  var position = orbitPosition(u, phi, impactDirection);
+  var direction = orbitDirection(u, uDot, phi, impactDirection);
   var previousPosition = position;
   var previousSide = dot(position, diskNormal);
   let initialPhi = phi;
   var minimumRadius = boundary;
   var transmittance = 1.0;
   var radiance = vec3f(0.0);
-  var captured = eSquare >= CRITICAL_E_SQUARE;
+  var captured = eSquare >= criticalESquare;
   var escaped = false;
   var crossingCount = 0;
 
-  let criticalImpact = inverseSqrt(CRITICAL_E_SQUARE + inverseBoundary * inverseBoundary * inverseBoundary);
+  let criticalImpact = inverseSqrt(criticalESquare + inverseBoundary * inverseBoundary * inverseBoundary);
   let criticalRefinement = 1.0 - smoothstep(0.025, 0.32, abs(impact - criticalImpact));
-  let stepLimit = i32(round(mix(112.0, 256.0, criticalRefinement)));
-  let dPhi = 0.035;
+  let stepLimit = i32(round(mix(128.0, 640.0, criticalRefinement)));
+  let dPhi = mix(0.040, 0.032, criticalRefinement);
 
-  for (var stepIndex = 0; stepIndex < 256; stepIndex += 1) {
+  for (var stepIndex = 0; stepIndex < 640; stepIndex += 1) {
     if (stepIndex >= stepLimit) {
       break;
     }
     if (u >= 1.0) {
-      position = orbitPosition(1.0, phi, impactDirection);
+      position = rotateAroundAxis(orbitPosition(1.0, phi, impactDirection), diskNormal, draggingAngle);
       minimumRadius = HORIZON_RADIUS;
+      captured = true;
       break;
     }
     if (uDot < 0.0 && u <= inverseBoundary && stepIndex > 2) {
@@ -352,19 +387,21 @@ fn fragment_main(@builtin(position) frag: vec4f) -> @location(0) vec4f {
       break;
     }
 
-    let acceleration0 = 1.5 * u * u - u;
+    let acceleration0 = pseudoKerrAcceleration(u, kerrBias);
     let nextU = u + uDot * dPhi + 0.5 * acceleration0 * dPhi * dPhi;
-    let acceleration1 = 1.5 * nextU * nextU - nextU;
+    let acceleration1 = pseudoKerrAcceleration(max(nextU, 0.0), kerrBias);
     uDot += 0.5 * (acceleration0 + acceleration1) * dPhi;
     u = nextU;
-    phi += dPhi;
+    phi += dPhi * (1.0 + abs(spin) * u * u * 0.035);
     if (u <= 0.0) {
       escaped = !captured;
       break;
     }
 
-    position = orbitPosition(u, phi, impactDirection);
-    direction = orbitDirection(u, uDot, phi, impactDirection);
+    let dragRate = spin * sin(inclination) * (0.018 + 0.16 * u * u / max(1.0 - u * 0.88, 0.12));
+    draggingAngle += dragRate * dPhi;
+    position = rotateAroundAxis(orbitPosition(u, phi, impactDirection), diskNormal, draggingAngle);
+    direction = rotateAroundAxis(orbitDirection(u, uDot, phi, impactDirection), diskNormal, draggingAngle);
     let radius = 1.0 / u;
     minimumRadius = min(minimumRadius, radius);
 
@@ -389,16 +426,18 @@ fn fragment_main(@builtin(position) frag: vec4f) -> @location(0) vec4f {
   var source = vec3f(0.0);
   if (!captured) {
     let escapedDirection = normalize(direction);
-    source = sampleEscapedGrid(position, escapedDirection);
+    let winding = phi - initialPhi + abs(draggingAngle);
+    source = sampleEscapedGrid(position, escapedDirection, winding);
     if (escaped) {
-      let ring = sampleRingSource(position, escapedDirection, phi - initialPhi);
+      let ring = sampleRingSource(position, escapedDirection, winding);
       source = mix(source, ring.emission, ring.opacity);
     }
   }
 
-  let photonHint = photonRingHint(minimumRadius) * (0.16 + criticalRefinement * 0.84);
+  let criticalRadius = PHOTON_RADIUS * clamp(1.0 - kerrBias * 0.085, 0.88, 1.12);
+  let photonHint = photonRingHint(minimumRadius, criticalRadius) * (0.16 + criticalRefinement * 0.84);
   var color = radiance + transmittance * source;
-  color += vec3f(1.0, 0.57, 0.16) * photonHint * 0.24;
+  color += vec3f(1.0, 0.57, 0.16) * photonHint * 0.11;
   let boundaryBlend = smoothstep(boundary * 0.76, boundary, impact);
   color = mix(color, directGrid, boundaryBlend);
   return vec4f(max(color, vec3f(0.0)), 1.0);

@@ -72,22 +72,26 @@ fn compute_main(@builtin(global_invocation_id) globalId: vec3u) {
     if (index < 144u) {
       let lane = index % 3u;
       let phase = fract(seed + scene.viewport_time.z * (0.16 + seed * 0.12));
-      var start = vec2f(0.69, 0.24);
-      var finish = vec2f(1.82, 0.24);
-      var angle = 0.0;
+      var start = vec2f(0.68, 0.20);
+      var finish = vec2f(1.84, 0.36);
+      var arch = 0.18;
       if (lane == 1u) {
-        start = vec2f(-0.70, 0.06);
-        finish = vec2f(-1.82, 0.10);
-        angle = PI - 0.035;
+        start = vec2f(-0.66, 0.08);
+        finish = vec2f(-1.82, 0.26);
+        arch = -0.16;
       } else if (lane == 2u) {
         start = vec2f(0.68, -0.26);
-        finish = vec2f(1.72, -0.31);
-        angle = -0.048;
+        finish = vec2f(1.74, -0.14);
+        arch = -0.14;
       }
       let transverse = (seed - 0.5) * 0.026;
       let tangent = normalize(finish - start);
       let normal = vec2f(-tangent.y, tangent.x);
-      let position = mix(start, finish, phase) + normal * transverse;
+      let fieldWave = sin(phase * PI) * arch + sin(phase * TAU * 1.5 + seed * TAU) * 0.014;
+      let position = mix(start, finish, phase) + normal * (fieldWave + transverse);
+      let derivative = finish - start
+        + normal * (cos(phase * PI) * arch * PI + cos(phase * TAU * 1.5 + seed * TAU) * 0.021 * TAU);
+      let angle = atan2(derivative.y, derivative.x);
       let intensity = power * smoothstep(0.0, 0.12, phase) * (1.0 - smoothstep(0.82, 1.0, phase));
       particles[index] = Particle(
         vec4f(position, 0.055 + seed * 0.055, 0.0035 + seed * 0.0025),
@@ -101,9 +105,12 @@ fn compute_main(@builtin(global_invocation_id) globalId: vec3u) {
       let radius = RING_RADIUS + (hash11(f32(droneIndex) + 14.8) - 0.5) * 1.25;
       let position = projectRing(angle, radius)
         + vec2f(0.0, (hash11(f32(droneIndex) + 33.4) - 0.5) * 0.075);
-      // Ring-adjacent units must be reconstructed by the lens pass as well.
-      // Keep their direct rasterized proxies hidden until that source model exists.
-      let visibility = 0.0;
+      let distanceFromLens = length(position - scene.lens.xy);
+      let outsideStrongLens = smoothstep(0.68, 0.90, distanceFromLens);
+      let dutyCycle = 0.52 + 0.48 * sin(scene.viewport_time.z * 1.3 + droneSeed * TAU);
+      let visibility = smoothstep(0.08, 0.34, scene.construction.x)
+        * outsideStrongLens
+        * dutyCycle;
       particles[index] = Particle(
         vec4f(position, 0.014 + droneSeed * 0.012, 0.005 + droneSeed * 0.004),
         vec4f(max(visibility, 0.0), 1.0, angle, droneSeed),
@@ -170,8 +177,8 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4f {
   let distance = length(input.local);
   let core = 1.0 - smoothstep(0.16, 0.82, distance);
   let halo = 1.0 - smoothstep(0.18, 1.0, distance);
-  let energyColor = vec3f(1.65, 0.44, 0.055) * core + vec3f(0.82, 0.20, 0.025) * halo;
-  let droneColor = vec3f(0.26, 0.62, 1.28) * core + vec3f(1.10, 0.52, 0.12) * halo * 0.42;
+  let energyColor = vec3f(0.10, 0.52, 1.55) * core + vec3f(0.035, 0.16, 0.48) * halo;
+  let droneColor = vec3f(0.34, 0.82, 1.46) * core + vec3f(0.94, 0.48, 0.10) * halo * 0.34;
   let color = mix(energyColor, droneColor, step(0.5, input.style.y));
   return vec4f(color * input.style.x * 0.62, halo * input.style.x);
 }

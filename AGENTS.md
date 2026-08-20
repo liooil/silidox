@@ -2,7 +2,7 @@
 
 This file provides guidance to Codex when working with code in this repository.
 
-Project architecture decisions live in `ARCHITECTURE.md`. Worldbuilding canon and open ideas live in `WORLD.md`, with detailed setting documents under `world/`. Follow these documents when choosing implementation approaches and writing in-game text. Write setting documents and in-game setting prose in Chinese by default.
+Project architecture decisions live in `ARCHITECTURE.md`. High-level game direction lives in `DESIGN.md`. Worldbuilding canon and open ideas live in `WORLD.md`, with detailed setting documents under `world/`. Follow these documents when choosing implementation approaches and writing in-game text. Write setting documents and in-game setting prose in Chinese by default.
 
 ## Project Overview
 
@@ -70,12 +70,12 @@ index.html
 
 ### `src/renderer/kerr/`
 
-- `grid-background.js`：生成并维护透镜校验用二维网格源画布，上传为 WebGPU 纹理；
-- `kerr-lens.js`：Schwarzschild 轨道方程反向追迹基线、吸积盘、磁层和远侧工程环透镜像；Kerr 自旋修正必须保持明确边界；
-- `ring-direct.js`：前景平台栅格化；旧工程环直接像 shader 不接入正式 Render Graph；
-- `energy-flow.js`：compute 驱动的环段状态和输能 ribbon；沿环直接投影的施工单元暂不显示；
+- `grid-background.js`：生成正式开场的确定性程序化星空和调试页可切换的二维透镜校验源，上传为 WebGPU 纹理；
+- `kerr-lens.js`：Schwarzschild 轨道方程反向追迹基线、吸积盘、磁层、背景和远侧工程环透镜像；Kerr 自旋修正必须保持明确边界；
+- `ring-direct.js`：直接可见的实例化工程环和前景平台栅格化；黑洞附近的远侧环段由 shader 裁掉并交给透镜 pass 重建；
+- `energy-flow.js`：compute 驱动的环段状态、输能 ribbon 和施工单位；强透镜区域内的施工活动由环源代理重建；
 - `post-process.js`：HDR Bloom、曝光和 tone mapping；
-- `kerr-scene.js`：Render Graph、WebGPU 资源生命周期和最终帧读回；工程环只通过透镜 pass 显示。
+- `kerr-scene.js`：Render Graph、WebGPU 资源生命周期和按需像素读回；正式背景始终使用星空，调试页可以切换诊断源。
 
 ### `src/simulation.js`
 
@@ -176,22 +176,6 @@ index.html
 - 后续内景是形骸、灵流与神意共同构成的可运行自我模型；不得实现成静态技能树或身体内部的 Factorio。
 - 道痕只允许功法在模拟运行期间无人值守；没有本地执行器时，页面关闭后仍然没有离线收益。
 - 能源、材料、维修和工业在修仙后继续存在，灵气不替代物理生产。
-
-## Legacy Files
-
-以下根目录文件属于未加载的旧原型：
-
-- `main.js`
-- `engine.js`
-- `screen.js`
-- `ide.js`
-- `lad.js`
-- `types.js`
-- `site-nav.js`
-- `SILLad.js`
-- `style.css`, `screen.css`, `ide.css`
-
-复用前必须确认其概念仍符合当前增量设计。
 
 ## Worldbuilding Documents
 

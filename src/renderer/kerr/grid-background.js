@@ -1,6 +1,110 @@
-// Diagnostic 2D source canvas used to expose the Kerr lens mapping.
+// Deterministic star field plus the diagnostic source plane used by the Kerr lens.
 (function defineSilidoxKerrGridBackground(global) {
   const namespace = (global.SilidoxKerr = global.SilidoxKerr || {});
+
+  namespace.sourceModes = Object.freeze({
+    stars: "stars",
+    grid: "grid",
+  });
+
+  namespace.normalizeSourceMode = function normalizeSourceMode(mode) {
+    return mode === namespace.sourceModes.grid
+      ? namespace.sourceModes.grid
+      : namespace.sourceModes.stars;
+  };
+
+  namespace.createSourceCanvas = function createSourceCanvas(width, height, mode = "stars") {
+    const canvas = document.createElement("canvas");
+    canvas.setAttribute("aria-hidden", "true");
+    namespace.paintSourceCanvas(canvas, width, height, mode);
+    return canvas;
+  };
+
+  namespace.paintSourceCanvas = function paintSourceCanvas(canvas, width, height, mode = "stars") {
+    const sourceMode = namespace.normalizeSourceMode(mode);
+    if (sourceMode === namespace.sourceModes.grid) {
+      namespace.paintGridCanvas(canvas, width, height);
+      return sourceMode;
+    }
+    namespace.paintStarCanvas(canvas, width, height);
+    return sourceMode;
+  };
+
+  namespace.createStarCanvas = function createStarCanvas(width, height) {
+    return namespace.createSourceCanvas(width, height, namespace.sourceModes.stars);
+  };
+
+  namespace.paintStarCanvas = function paintStarCanvas(canvas, width, height) {
+    canvas.width = Math.max(1, width);
+    canvas.height = Math.max(1, height);
+    const context = canvas.getContext("2d", { alpha: false });
+    if (!context) throw new Error("Kerr star field requires a 2D canvas context");
+
+    const safeWidth = canvas.width;
+    const safeHeight = canvas.height;
+    const minimumDimension = Math.min(safeWidth, safeHeight);
+    context.fillStyle = "#010207";
+    context.fillRect(0, 0, safeWidth, safeHeight);
+
+    context.save();
+    context.translate(safeWidth * 0.52, safeHeight * 0.46);
+    context.rotate(-0.20);
+    const bandHeight = Math.max(96, minimumDimension * 0.34);
+    const galaxy = context.createLinearGradient(0, -bandHeight, 0, bandHeight);
+    galaxy.addColorStop(0, "rgba(7, 12, 24, 0)");
+    galaxy.addColorStop(0.33, "rgba(32, 45, 68, 0.18)");
+    galaxy.addColorStop(0.50, "rgba(84, 75, 70, 0.24)");
+    galaxy.addColorStop(0.66, "rgba(26, 42, 70, 0.17)");
+    galaxy.addColorStop(1, "rgba(5, 9, 20, 0)");
+    context.fillStyle = galaxy;
+    context.fillRect(-safeWidth, -bandHeight, safeWidth * 2, bandHeight * 2);
+    context.restore();
+
+    const starCount = Math.min(2200, Math.max(420, Math.round((safeWidth * safeHeight) / 720)));
+    for (let index = 0; index < starCount; index += 1) {
+      const x = hash01(index * 11.73 + 2.17) * safeWidth;
+      const baseY = hash01(index * 19.91 + 8.41);
+      const bandBias = (hash01(index * 5.37 + 4.03) - 0.5) * 0.34;
+      const galaxyY = 0.46 - (x / safeWidth - 0.52) * 0.20 + bandBias;
+      const inBand = hash01(index * 29.17 + 6.11) > 0.46;
+      const y = (inBand ? galaxyY : baseY) * safeHeight;
+      if (y < 0 || y > safeHeight) continue;
+
+      const energy = Math.pow(hash01(index * 41.31 + 1.27), 5.2);
+      const radius = 0.35 + energy * 1.65;
+      const warmth = hash01(index * 13.57 + 9.73);
+      const alpha = 0.20 + energy * 0.76;
+      context.fillStyle =
+        warmth > 0.82
+          ? `rgba(255, 220, 174, ${alpha})`
+          : warmth < 0.18
+            ? `rgba(170, 208, 255, ${alpha})`
+            : `rgba(226, 234, 244, ${alpha})`;
+      context.beginPath();
+      context.arc(x, y, radius, 0, Math.PI * 2);
+      context.fill();
+
+      if (energy > 0.78) {
+        context.strokeStyle = `rgba(224, 235, 255, ${alpha * 0.42})`;
+        context.lineWidth = 0.7;
+        context.beginPath();
+        context.moveTo(x - radius * 3.2, y);
+        context.lineTo(x + radius * 3.2, y);
+        context.moveTo(x, y - radius * 2.2);
+        context.lineTo(x, y + radius * 2.2);
+        context.stroke();
+      }
+    }
+
+    const dustCount = Math.round(starCount * 0.34);
+    context.fillStyle = "rgba(162, 181, 210, 0.13)";
+    for (let index = 0; index < dustCount; index += 1) {
+      const x = hash01(index * 23.71 + 17.4) * safeWidth;
+      const centerY = safeHeight * (0.46 - (x / safeWidth - 0.52) * 0.20);
+      const y = centerY + (hash01(index * 31.13 + 3.2) - 0.5) * minimumDimension * 0.25;
+      context.fillRect(x, y, 0.8, 0.8);
+    }
+  };
 
   namespace.createGridCanvas = function createGridCanvas(width, height) {
     const canvas = document.createElement("canvas");
@@ -101,4 +205,9 @@
     context.font = "700 12px ui-monospace, SFMono-Regular, Consolas, monospace";
     context.fillText("KERR LENS SOURCE PLANE", 18, 16);
   };
+
+  function hash01(value) {
+    const sine = Math.sin(value * 12.9898 + 78.233) * 43758.5453123;
+    return sine - Math.floor(sine);
+  }
 })(globalThis);

@@ -77,10 +77,12 @@ fn vertex_main(
   let tangent = -basisX * sin(angle) + basisZ * cos(angle);
   let local = cubePosition(vertexIndex);
   let segmentLength = TAU * RING_RADIUS / SEGMENT_COUNT * 0.43;
+  let collectorPhase = pow(max(0.5 + 0.5 * cos(angle * 18.0), 0.0), 24.0);
+  let servicePhase = pow(max(0.5 + 0.5 * cos(angle * 9.0 + 1.1), 0.0), 32.0);
   let world = radial * RING_RADIUS
     + tangent * local.x * segmentLength
-    + normal * local.y * 0.105
-    + radial * local.z * 0.42;
+    + normal * local.y * (0.105 + collectorPhase * 0.18 + servicePhase * 0.07)
+    + radial * local.z * (0.42 + servicePhase * 0.08);
 
   let projected = rotate2(world.xy / scene.lens.z, -scene.camera.y);
   let screenPosition = vec2f(projected.x, -projected.y) + scene.lens.xy;
@@ -107,7 +109,7 @@ fn vertex_main(
 @fragment
 fn fragment_main(input: VertexOutput) -> @location(0) vec4f {
   let fromCenter = input.screen_position - scene.lens.xy;
-  if (input.module_state.w < 0.5 && length(fromCenter) < 0.62) {
+  if (input.module_state.w < 0.5 && length(fromCenter) < 0.76) {
     discard;
   }
   let inward = normalize(vec3f(0.25, 0.48, 0.84));
@@ -116,7 +118,8 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4f {
   let panel = smoothstep(0.04, 0.16, modulePhase) * (1.0 - smoothstep(0.84, 0.97, modulePhase));
   let collector = pow(max(0.5 + 0.5 * cos(input.module_state.x * TAU * 18.0), 0.0), 46.0);
   let navigation = pow(max(0.5 + 0.5 * cos(input.module_state.x * TAU * 72.0 + 0.8), 0.0), 56.0);
-  let metal = mix(vec3f(0.012, 0.016, 0.020), vec3f(0.105, 0.095, 0.075), panel) * diffuse;
+  let sideGain = mix(0.68, 1.18, input.module_state.w);
+  let metal = mix(vec3f(0.018, 0.024, 0.032), vec3f(0.16, 0.14, 0.105), panel) * diffuse * sideGain;
   let reflectedDisk = vec3f(0.42, 0.13, 0.025) * max(dot(-input.world_normal, inward), 0.0) * 0.28;
   let leading = input.module_state.z;
   let color = metal

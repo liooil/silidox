@@ -61,8 +61,7 @@
         play: () => false,
         setDebugPlayback: () => null,
         getDebugPlayback: () => null,
-        capturePixels: () => Promise.reject(new Error("opening shell unavailable")),
-        getCanvas: () => null,
+        readDiagnosticPixels: () => Promise.reject(new Error("opening shell unavailable")),
         dispose: () => {},
       };
     }
@@ -81,6 +80,7 @@
       progress: 1,
       speed: 1,
       tracer: false,
+      sourceMode: "stars",
     };
     const reducedMotion = Boolean(
       global.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches,
@@ -140,7 +140,12 @@
         const initialTime = debugPlayback.enabled ? debugPlayback.timeSeconds : 0;
         const initialProgress = debugPlayback.enabled ? debugPlayback.progress : 0;
         updateHud(initialProgress, "webgpu");
-        renderer.render(initialTime, initialProgress, { tracer: debugPlayback.tracer });
+        const initialSourceMode = debugPlayback.enabled ? debugPlayback.sourceMode : "stars";
+        els.root.dataset.sourceMode = initialSourceMode;
+        renderer.render(initialTime, initialProgress, {
+          tracer: debugPlayback.tracer,
+          sourceMode: initialSourceMode,
+        });
         frameId = global.requestAnimationFrame(renderFrame);
       } catch (error) {
         if (!active || runToken !== renderRun) return;
@@ -175,8 +180,11 @@
       }
       debugLastFrameAt = now;
       updateHud(progress, renderer.backend);
+      const sourceMode = debugPlayback.enabled ? debugPlayback.sourceMode : "stars";
+      els.root.dataset.sourceMode = sourceMode;
       renderer.render(displayTime, progress, {
         tracer: debugPlayback.enabled && debugPlayback.tracer,
+        sourceMode,
       });
       frameId = global.requestAnimationFrame(renderFrame);
     }
@@ -192,11 +200,16 @@
         debugPlayback.speed = Math.max(0.05, Math.min(8, patch.speed));
       }
       if (Object.hasOwn(patch, "tracer")) debugPlayback.tracer = Boolean(patch.tracer);
+      if (Object.hasOwn(patch, "sourceMode")) {
+        debugPlayback.sourceMode = patch.sourceMode === "grid" ? "grid" : "stars";
+      }
       debugLastFrameAt = performance.now();
       if (active && renderer && debugPlayback.enabled) {
         updateHud(debugPlayback.progress, renderer.backend);
+        els.root.dataset.sourceMode = debugPlayback.sourceMode;
         renderer.render(debugPlayback.timeSeconds, debugPlayback.progress, {
           tracer: debugPlayback.tracer,
+          sourceMode: debugPlayback.sourceMode,
         });
       }
       return getDebugPlayback();
@@ -210,7 +223,7 @@
       };
     }
 
-    function capturePixels() {
+    function readDiagnosticPixels() {
       if (!active || !renderer) {
         return Promise.reject(new Error("WebGPU renderer is not ready"));
       }
@@ -270,8 +283,7 @@
       play,
       setDebugPlayback,
       getDebugPlayback,
-      capturePixels,
-      getCanvas: () => els.gpuCanvas,
+      readDiagnosticPixels,
       dispose,
     };
   }

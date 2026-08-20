@@ -55,22 +55,19 @@
           <span>物质示踪</span>
         </label>
 
-        <div class="debug-capture-actions">
-          <button id="debugCaptureFrameBtn" type="button">导出 PNG</button>
-          <button id="debugRecordBtn" type="button">录制 6 秒</button>
+        <div class="debug-source-control">
+          <span>背景源</span>
+          <div class="debug-source" role="group" aria-label="背景源">
+            <button id="debugSourceStarsBtn" type="button" data-debug-source="stars" class="active">星空</button>
+            <button id="debugSourceGridBtn" type="button" data-debug-source="grid">诊断源平面</button>
+          </div>
+        </div>
+
+        <div class="debug-diagnostic-actions">
           <button id="debugPixelCheckBtn" type="button">像素检查</button>
         </div>
 
         <output class="debug-diagnostic-output" id="debugDiagnosticOutput">等待检验。</output>
-
-        <div class="debug-capture-result" id="debugCaptureResult" hidden>
-          <a id="debugCaptureDownload" class="debug-link" download="silidox-kerr-capture.tar">下载最近检验包</a>
-        </div>
-
-        <div class="debug-recording-result" id="debugRecordingResult" hidden>
-          <video id="debugRecordingPreview" controls loop muted playsinline></video>
-          <a id="debugRecordingDownload" class="debug-link" download="silidox-kerr-debug.webm">下载 WebM</a>
-        </div>
       </div>
     </details>
 
@@ -82,7 +79,6 @@
     <script src="../src/renderer/kerr/post-process.js"></script>
     <script src="../src/renderer/kerr/kerr-scene.js"></script>
     <script src="../src/opening-kerr.js"></script>
-    <script src="./render-capture.js"></script>
     <script src="./kerr-opening.js"></script>
   </body>
 </html>

@@ -42,7 +42,6 @@ const pages = [
       "../src/renderer/kerr/post-process.js",
       "../src/renderer/kerr/kerr-scene.js",
       "../src/opening-kerr.js",
-      "./render-capture.js",
       "./kerr-opening.js",
     ],
     styles: ["../styles.css", "./debug.css"],
@@ -103,39 +102,16 @@ test("kerr debug page exposes local timeline and canvas diagnostics", () => {
     "debugTimeRange",
     "debugProgressRange",
     "debugTracerToggle",
-    "debugCaptureFrameBtn",
-    "debugRecordBtn",
+    "debugSourceStarsBtn",
+    "debugSourceGridBtn",
     "debugPixelCheckBtn",
-    "debugCaptureDownload",
-    "debugRecordingPreview",
   ]) {
     assert.match(html, new RegExp(`id="${id}"`));
   }
 
-  assert.match(debugSource, /canvas\.captureStream\(60\)/);
-  assert.match(debugSource, /new MediaRecorder\(stream/);
-  assert.match(debugSource, /opening\.capturePixels\(\)/);
-  assert.match(debugSource, /Capture\.frameToPng\(frame\)/);
-  assert.match(debugSource, /Capture\.createBundle/);
-  assert.match(debugSource, /runAutomaticCapture/);
+  assert.match(debugSource, /opening\.readDiagnosticPixels\(\)/);
   assert.doesNotMatch(debugSource, /localStorage/);
   assert.match(openingSource, /setDebugPlayback/);
   assert.match(sceneSource, /GPUTextureUsage\.RENDER_ATTACHMENT \| GPUTextureUsage\.COPY_SRC/);
   assert.match(sceneSource, /copyTextureToBuffer/);
-});
-
-test("kerr capture handoff uses file downloads without a network listener", () => {
-  const helperSource = fs.readFileSync(path.join(root, "debug/render-capture.js"), "utf8");
-  const scriptPath = path.join(root, "debug/capture-kerr.sh");
-  const scriptSource = fs.readFileSync(scriptPath, "utf8");
-
-  assert.match(helperSource, /application\/x-tar/);
-  assert.match(helperSource, /canvas\.toBlob/);
-  assert.match(helperSource, /link\.download/);
-  assert.match(scriptSource, /file:\/\/\$root_url\/debug\/kerr-opening\.html\?capture=/);
-  assert.match(scriptSource, /SILIDOX_CAPTURE_DIR:-\/tmp\/silidox-captures/);
-  assert.match(scriptSource, /--no-remote --profile/);
-  assert.doesNotMatch(scriptSource, /https?:\/\//);
-  assert.doesNotMatch(scriptSource, /(--remote-debugging-port|--marionette|geckodriver)/);
-  assert.notEqual(fs.statSync(scriptPath).mode & 0o111, 0, "capture script must be executable");
 });

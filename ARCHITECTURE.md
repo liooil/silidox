@@ -41,12 +41,12 @@ index.html
 所有文件继续使用经典脚本，并通过明确的 `Silidox*` 全局命名空间协作。
 
 - `src/data.js`：静态资源、森林与地下二叉矿路、建设、控制器与设备 I/O 定义；不读取存档或 DOM。
-- `src/renderer/kerr/grid-background.js`：生成用于校验透镜映射的二维网格源画布；画布上传为 WebGPU 纹理，不作为 Canvas 渲染降级。
-- `src/renderer/kerr/kerr-lens.js`：采样网格源平面，并以 Schwarzschild 无量纲轨道方程建立稳定的反向光线追迹基线；负责黑洞阴影、吸积盘、磁层和远侧工程环的多重透镜像，不绘制直接实体。Kerr 自旋修正必须在该基线上独立实现，不能重新使用固定步数耗尽即捕获的伪积分。
-- `src/renderer/kerr/ring-direct.js`：提供前景平台栅格化；文件中的旧工程环直接像 shader 不接入正式 Render Graph，取能环只允许由透镜 pass 重建。
-- `src/renderer/kerr/energy-flow.js`：compute shader 更新环段闭合状态和外围输能 ribbon，独立 render pass 读取 storage buffer；沿环直接投影的施工单位保持隐藏，直至它们也能进入透镜源模型。
+- `src/renderer/kerr/grid-background.js`：生成正式开场使用的确定性程序化星空，以及调试页可切换的二维透镜校验源；两种源画布都上传为 WebGPU 纹理，不作为 Canvas 渲染降级。
+- `src/renderer/kerr/kerr-lens.js`：以 Schwarzschild 无量纲轨道方程建立稳定的反向光线追迹基线，并在明确边界内加入实时视觉用 Kerr 自旋修正；负责黑洞阴影、吸积盘、磁层、背景和远侧工程环的多重透镜像。该修正用于表现 frame dragging 与非对称临界曲线，不宣称为精确 Kerr 度规积分。
+- `src/renderer/kerr/ring-direct.js`：栅格化直接可见的实例化工程环和前景平台。黑洞附近的远侧环段直接像由 shader 裁掉，并由透镜 pass 重建；近侧环、黑洞区域外的远侧环和前景结构继续作为实体绘制。
+- `src/renderer/kerr/energy-flow.js`：compute shader 更新环段闭合状态、外围冷色输能 ribbon 和施工单位，独立 render pass 读取 storage buffer；强透镜区域内的施工活动由环源代理重建，区域外单位允许直接投影。
 - `src/renderer/kerr/post-process.js`：从 `rgba16float` 场景提取 Bloom，并统一执行曝光、tone mapping 与显示 gamma。
-- `src/renderer/kerr/kerr-scene.js`：组织 compute、网格源平面、局部透镜、前景、能流、Bloom 和最终合成的 Render Graph，并提供最终帧像素读回；不得增加绕过透镜的工程环直接像 pass。
+- `src/renderer/kerr/kerr-scene.js`：组织 compute、星空或诊断源、局部透镜、实体工程环、前景、能流、Bloom 和最终合成的 Render Graph，并为调试页的像素检查提供按需读回。正式入口始终选择星空；只有调试入口可以切换诊断源平面。
 - `src/opening-kerr.js`：只负责克尔黑洞取能环开场的 DOM、生命周期、时间轴与视觉状态；WebGPU 不可用时只显示建设记录文字状态，不维护低保真画布降级，也不推进确定性模拟。
 - `src/simulation.js`：确定性的资源、停机、移动、建设、控制与阶段推进；不访问 DOM 或 localStorage。
 - `src/inner-landscape.js`：内景确定性内核；节点灵流、灵压、温度、杂质、稳定度推进与四类故障检测；不访问 DOM 或 localStorage。
@@ -55,26 +55,33 @@ index.html
 - `src/ui.js`：DOM 缓存、事件绑定、工作区和诊断界面渲染。
 - `src/app.js`：启动、固定步长时钟、模块编排、存档和下载。
 
+克尔开场的正式 Render Graph 顺序为：
+
+```text
+simulation.compute
+  -> sky.render
+  -> kerr-lens.fragment
+  -> ring-direct.render
+  -> foreground.render
+  -> energy-ribbons.render
+  -> bloom.render
+  -> tone-map.render
+```
+
+`ring-direct.render` 消费与 compute pass 相同的环段 storage buffer。它只提供直接实体像；透镜 pass 中的程序化环源只提供远侧环和施工活动的弯曲像，二者不能互相替代。
+
 ## 调试页面
 
 `debug/` 存放可以直接打开的场景调试页。它们和正式入口一样使用经典脚本与相对路径，不使用模块、框架、打包器或独立构建步骤。
 
 - `debug/index.html`：调试场景入口。
 - `debug/kerr-opening.html`：克尔黑洞取能环开场调试页，复用 `src/data.js` 与 `src/opening-kerr.js`，不读取或写入正式存档。
-- `debug/render-capture.js`：调试场景共享的浏览器侧捕获工具，将 WebGPU 像素读回编码为 PNG，并把 PNG 或 WebM 与 `capture.json` 清单封装为无压缩 TAR。
-- `debug/capture-kerr.sh`：使用独立 Firefox 配置直接打开 `file:///` 调试页，将自动下载目录固定到 `/tmp/silidox-captures`，等待 TAR 落盘后解包；不启动 HTTP 服务、远程调试端口或其他网络监听器。
 
 调试页可以构造专用的临时状态，但不能复制正式模拟逻辑。场景 DOM、渲染器和玩法内核应优先从 `src/` 复用；需要新增场景时，先把可复用部分做成普通全局命名空间模块，再由正式入口和调试页共同加载。
 
-渲染捕获通过查询参数固定时间、施工进度、示踪模式和输出尺寸。单帧使用 WebGPU `COPY_SRC` 读回后编码为 PNG，动态效果使用 `canvas.captureStream()` 与 `MediaRecorder` 录制 WebM。浏览器页面不连接 Unix socket；最终 TAR 文件由 Firefox 下载到已知目录，其从 `.part` 重命名为正式文件即作为捕获完成信号。
+当前阶段的自动化测试只保护经典脚本可解析、直接文件资源完整、关键 Render Graph pass 存在和调试控件接线等结构边界。视觉效果通过直接打开调试页人工检查，不增加像素快照、颜色阈值、固定 shader 数值或特定 GPU 输出的断言。
 
-```bash
-# T+12 秒、施工 100%、关闭物质示踪的单帧
-./debug/capture-kerr.sh frame 12 1 0
-
-# T+12 秒开始、施工 100%、录制 6 秒、1 倍速、关闭物质示踪
-./debug/capture-kerr.sh video 12 1 6 1 0
-```
+克尔调试页可以固定时间、施工进度、示踪模式和背景源，并按需读取两帧像素统计非黑区域、阴影亮度和动画差异。调试页不承担图片或视频导出。
 
 ## 游戏系统边界
 

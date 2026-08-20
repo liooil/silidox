@@ -172,8 +172,9 @@
 }
 
 .debug-transport,
-.debug-capture-actions,
-.debug-speed {
+.debug-diagnostic-actions,
+.debug-speed,
+.debug-source {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -187,10 +188,25 @@
   margin-left: auto;
 }
 
-.debug-speed button.active {
+.debug-speed button.active,
+.debug-source button.active {
   border-color: var(--cyan);
   color: var(--cyan);
   background: rgba(73, 188, 183, 0.1);
+}
+
+.debug-source-control {
+  display: grid;
+  gap: 6px;
+}
+
+.debug-source-control > span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.debug-source button {
+  flex: 1;
 }
 
 .debug-range-control {
@@ -218,35 +234,13 @@
   font-size: 11px;
 }
 
-.debug-capture-actions button {
+.debug-diagnostic-actions button {
   flex: 1;
 }
 
 .debug-diagnostic-output {
   min-height: 16px;
   overflow-wrap: anywhere;
-}
-
-.debug-recording-result {
-  display: grid;
-  gap: 8px;
-}
-
-.debug-capture-result {
-  display: flex;
-  align-items: center;
-}
-
-.debug-capture-result[hidden],
-.debug-recording-result[hidden] {
-  display: none;
-}
-
-.debug-recording-result video {
-  width: 100%;
-  aspect-ratio: 16 / 9;
-  border: 1px solid var(--line);
-  background: #000;
 }
 
 @media (max-width: 760px) {

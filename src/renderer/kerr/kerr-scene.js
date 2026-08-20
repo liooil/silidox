@@ -17,8 +17,9 @@
       this.pendingReadback = null;
       this.hdrTexture = null;
       this.bloomTexture = null;
-      this.gridCanvas = null;
-      this.gridTexture = null;
+      this.sourceCanvas = null;
+      this.sourceTexture = null;
+      this.sourceMode = "";
       this.postBindGroup = null;
       this.bloomBindGroup = null;
 
@@ -59,6 +60,7 @@
       const shaderModule = (label, code) => device.createShaderModule({ label, code });
       const skyModule = shaderModule("silidox-kerr-sky-shader", namespace.skyShader);
       const lensModule = shaderModule("silidox-kerr-lens-shader", namespace.lensShader);
+      const ringModule = shaderModule("silidox-kerr-ring-direct-shader", namespace.ringDirectShader);
       const simulationModule = shaderModule("silidox-kerr-simulation-shader", namespace.simulationShader);
       const foregroundModule = shaderModule("silidox-kerr-foreground-shader", namespace.foregroundShader);
       const energyModule = shaderModule("silidox-kerr-energy-render-shader", namespace.energyRenderShader);
@@ -67,6 +69,7 @@
       this.shaderModules = {
         sky: skyModule,
         lens: lensModule,
+        ring: ringModule,
         simulation: simulationModule,
         foreground: foregroundModule,
         energy: energyModule,
@@ -92,6 +95,13 @@
         label: "silidox-kerr-simulation-pipeline",
         layout: "auto",
         compute: { module: simulationModule, entryPoint: "compute_main" },
+      });
+      this.ringPipeline = device.createRenderPipeline({
+        label: "silidox-kerr-ring-direct-pipeline",
+        layout: "auto",
+        vertex: { module: ringModule, entryPoint: "vertex_main" },
+        fragment: { module: ringModule, entryPoint: "fragment_main", targets: [{ format: HDR_FORMAT }] },
+        primitive: { topology: "triangle-list" },
       });
       this.foregroundPipeline = device.createRenderPipeline({
         label: "silidox-kerr-foreground-pipeline",
@@ -191,6 +201,10 @@
         layout: this.foregroundPipeline.getBindGroupLayout(0),
         entries: [uniformEntry],
       });
+      this.ringBindGroup = this.device.createBindGroup({
+        layout: this.ringPipeline.getBindGroupLayout(0),
+        entries: [uniformEntry, { binding: 1, resource: { buffer: this.segmentBuffer } }],
+      });
       this.energyBindGroup = this.device.createBindGroup({
         layout: this.energyPipeline.getBindGroupLayout(0),
         entries: [uniformEntry, { binding: 1, resource: { buffer: this.particleBuffer } }],
@@ -237,28 +251,35 @@
       return renderer;
     }
 
-    resize() {
+    resize(sourceMode = namespace.sourceModes.stars) {
       this.pixelRatio = Math.min(MAX_PIXEL_RATIO, Math.max(1, global.devicePixelRatio || 1));
       const width = Math.max(1, Math.round(this.canvas.clientWidth * this.pixelRatio));
       const height = Math.max(1, Math.round(this.canvas.clientHeight * this.pixelRatio));
-      if (this.canvas.width === width && this.canvas.height === height && this.hdrTexture) return;
+      const nextSourceMode = namespace.normalizeSourceMode(sourceMode);
+      if (
+        this.canvas.width === width
+        && this.canvas.height === height
+        && this.hdrTexture
+        && this.sourceMode === nextSourceMode
+      ) return;
       this.canvas.width = width;
       this.canvas.height = height;
       this.destroyFrameTextures();
-      if (!this.gridCanvas) {
-        this.gridCanvas = namespace.createGridCanvas(width, height);
+      this.sourceMode = nextSourceMode;
+      if (!this.sourceCanvas) {
+        this.sourceCanvas = namespace.createSourceCanvas(width, height, nextSourceMode);
       } else {
-        namespace.paintGridCanvas(this.gridCanvas, width, height);
+        namespace.paintSourceCanvas(this.sourceCanvas, width, height, nextSourceMode);
       }
-      this.gridTexture = this.device.createTexture({
-        label: "silidox-kerr-grid-source",
+      this.sourceTexture = this.device.createTexture({
+        label: `silidox-kerr-${nextSourceMode}-source`,
         size: [width, height],
         format: "rgba8unorm",
         usage: GPUTextureUsage.COPY_DST | GPUTextureUsage.TEXTURE_BINDING,
       });
       this.device.queue.copyExternalImageToTexture(
-        { source: this.gridCanvas },
-        { texture: this.gridTexture },
+        { source: this.sourceCanvas },
+        { texture: this.sourceTexture },
         { width, height },
       );
       this.hdrTexture = this.device.createTexture({
@@ -273,18 +294,18 @@
         format: HDR_FORMAT,
         usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
       });
-      const gridEntries = [
+      const sourceEntries = [
         { binding: 0, resource: { buffer: this.uniformBuffer } },
-        { binding: 1, resource: this.gridTexture.createView() },
+        { binding: 1, resource: this.sourceTexture.createView() },
         { binding: 2, resource: this.linearSampler },
       ];
       this.skyBindGroup = this.device.createBindGroup({
         layout: this.skyPipeline.getBindGroupLayout(0),
-        entries: gridEntries,
+        entries: sourceEntries,
       });
       this.lensBindGroup = this.device.createBindGroup({
         layout: this.lensPipeline.getBindGroupLayout(0),
-        entries: gridEntries,
+        entries: sourceEntries,
       });
       this.bloomBindGroup = this.device.createBindGroup({
         layout: this.bloomPipeline.getBindGroupLayout(0),
@@ -304,7 +325,7 @@
     }
 
     render(timeSeconds, progress, diagnostics = {}) {
-      this.resize();
+      this.resize(diagnostics.sourceMode);
       const construction = Math.min(1, Math.max(0, progress));
       const closure = Math.max(0, Math.min(1, (construction - 0.58) / 0.34));
       this.uniformData.set([
@@ -331,6 +352,7 @@
       this.encodeSimulation(encoder);
       this.encodeSky(encoder);
       this.encodeLens(encoder);
+      this.encodeRing(encoder);
       this.encodeForeground(encoder);
       this.encodeEnergy(encoder);
       this.encodeBloom(encoder);
@@ -394,6 +416,19 @@
       pass.setBindGroup(0, this.foregroundBindGroup);
       pass.setVertexBuffer(0, this.foregroundBuffer);
       pass.draw(6, this.foregroundData.length / 8);
+      pass.end();
+    }
+
+    encodeRing(encoder) {
+      const pass = encoder.beginRenderPass({
+        label: "ring-direct.render",
+        colorAttachments: [
+          { view: this.hdrTexture.createView(), loadOp: "load", storeOp: "store" },
+        ],
+      });
+      pass.setPipeline(this.ringPipeline);
+      pass.setBindGroup(0, this.ringBindGroup);
+      pass.draw(36, namespace.segmentCount);
       pass.end();
     }
 
@@ -517,10 +552,10 @@
     destroyFrameTextures() {
       this.hdrTexture?.destroy();
       this.bloomTexture?.destroy();
-      this.gridTexture?.destroy();
+      this.sourceTexture?.destroy();
       this.hdrTexture = null;
       this.bloomTexture = null;
-      this.gridTexture = null;
+      this.sourceTexture = null;
     }
 
     dispose() {
@@ -539,13 +574,16 @@
     for (const key of [
       "skyShader",
       "lensShader",
+      "ringDirectShader",
       "simulationShader",
       "foregroundShader",
       "energyRenderShader",
       "bloomShader",
       "compositeShader",
-      "createGridCanvas",
-      "paintGridCanvas",
+      "sourceModes",
+      "normalizeSourceMode",
+      "createSourceCanvas",
+      "paintSourceCanvas",
       "createForegroundInstances",
     ]) {
       if (!namespace[key]) throw createWebGpuError("missing_renderer", `SilidoxKerr.${key} is missing`);
