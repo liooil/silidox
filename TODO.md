@@ -141,3 +141,4 @@
 - [x] Support dragging existing contacts to reorder or move them between rungs.
 - [ ] Add parallel branch editing and rendering.
 - [x] Add a clearer variable/pin picker for inserted nodes.
+- [ ] ECS deployment check
